@@ -129,3 +129,47 @@ test('un fisioterapeuta no entra a las secciones del dueño', async ({ page }) =
   const r = await page.request.get('/api/billing');
   expect(r.status()).toBe(403);
 });
+
+// AUTH-10 · Recepción: menú administrativo, sin secciones clínicas ni de configuración.
+test('recepción no ve el menú clínico ni entra a Configuración, Equipo, Recetas o Estudios', async ({ page }, info) => {
+  await login(page, 'r.morales');
+  await expect(page.getByRole('heading', { name: 'Panel de recepción' })).toBeVisible();
+
+  // El menú completo está en la barra lateral (escritorio) o en "Más" (celular).
+  if (info.project.name === 'celular') await page.getByRole('button', { name: 'Más' }).click();
+  const nav = info.project.name === 'celular' ? sheet(page) : page.getByRole('navigation', { name: 'Principal' }).first();
+  await expect(nav.getByRole('link', { name: 'Mensualidades' })).toBeVisible();
+  for (const label of ['Recetas', 'Estudios', 'Configuración', 'Equipo']) {
+    await expect(page.getByRole('link', { name: label, exact: true })).toHaveCount(0);
+  }
+
+  for (const path of ['/configuracion', '/equipo', '/recetas', '/estudios']) {
+    await page.goto(path);
+    await expect(page.getByText('Sin acceso')).toBeVisible();
+  }
+
+  // Mensualidades sí abre, solo con las pestañas del mostrador.
+  await page.goto('/mensualidades');
+  await expect(page.getByRole('heading', { name: 'Mensualidades' })).toBeVisible();
+  await expect(page.getByText('Cobros en línea')).toBeVisible();
+  await expect(page.getByText('Ingresos', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Facturas', { exact: true })).toHaveCount(0);
+
+  // El expediente se reduce a la ficha: sin pestañas ni acciones clínicas.
+  await page.goto('/pacientes');
+  await page.locator('a.card').first().click();
+  await page.waitForURL(/\/pacientes\/[0-9a-f-]{36}/);
+  await expect(page.getByRole('heading', { name: 'Ficha del paciente' })).toBeVisible();
+  for (const label of ['Nueva receta', 'Agregar nota', 'Subir estudio']) {
+    await expect(page.getByRole('button', { name: label })).toHaveCount(0);
+  }
+  for (const label of ['Perfil clínico', 'Sesiones', 'Estudios', 'Recetas']) {
+    await expect(page.getByText(label, { exact: true })).toHaveCount(0);
+  }
+  const id = page.url().match(/pacientes\/([0-9a-f-]{36})/)![1];
+
+  // La API responde 403 aunque se pida a mano.
+  for (const url of [`/api/patients/${id}/notes`, `/api/patients/${id}/profile`, `/api/patients/${id}/summary`, '/api/studies', '/api/documents', '/api/users', '/api/audit', '/api/billing/report']) {
+    expect((await page.request.get(url)).status(), url).toBe(403);
+  }
+});
