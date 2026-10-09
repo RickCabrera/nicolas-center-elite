@@ -16,7 +16,7 @@ const Query = z.object({
 
 // REC-09 / REC-10 · Lista de documentos emitidos. RLS limita: el dueño ve todo; el profesional,
 // lo que emitió y lo de sus pacientes. `mine=1` deja solo lo emitido por quien consulta.
-export const GET = route({ auth: 'user', query: Query }, async ({ db, user, query }) => {
+export const GET = route({ auth: 'clinical', query: Query }, async ({ db, user, query }) => {
   const { limit, offset } = paging(query);
   const mine = query.mine === '1' || query.mine === 'true';
   const where = db`
@@ -66,7 +66,7 @@ const Body = z.object({
 
 // REC-01, REC-02, REC-04, REC-05, REC-06 · Emite una receta médica o unas indicaciones fisioterapéuticas.
 // Firma SIEMPRE quien emite (lo fija la base); cualquier emisor que mande el cliente se ignora.
-export const POST = route({ auth: 'user', body: Body }, async ({ db, user, body }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, user, body }) => {
   // REC-02 / REC-04 · Facultad de prescribir. La base lo vuelve a exigir en el trigger.
   const hasLicense = !!user.license_number?.trim();
   if (body.kind === 'prescription' && !(user.is_physician && hasLicense)) throw forbidden(PHYSICIAN_ONLY);

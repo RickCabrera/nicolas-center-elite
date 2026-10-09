@@ -11,8 +11,8 @@ const Query = z.preprocess(dropEmpty, z.object({
   q: z.string().trim().max(100).optional(),
 }));
 
-// PAG-06 · Tablero de mensualidades: estado de pago por paciente activo. El estado lo calcula la base (PAG-03).
-export const GET = route({ auth: 'owner', query: Query }, async ({ db, query }) => {
+// PAG-06 · Tablero de mensualidades (dueño y recepción): estado de pago por paciente activo. El estado lo calcula la base (PAG-03).
+export const GET = route({ auth: 'front', query: Query }, async ({ db, query }) => {
   const like = query.q ? '%' + query.q.replace(/[\\%_]/g, '\\$&') + '%' : null;
   const fLoc = query.location_id ? db`and p.location_id = ${query.location_id}` : db``;
   const fSearch = like ? db`and norm(p.full_name || ' ' || p.record_number) like norm(${like})` : db``;

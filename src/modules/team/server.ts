@@ -30,8 +30,12 @@ export const phone = z.string().trim().max(30, 'Máximo 30 caracteres.').refine(
 export const license = z.string().trim().nullish().transform((v) => (v ? v.replace(/\s+/g, '') : null))
   .refine((v) => v === null || /^[0-9A-Za-z-]{5,12}$/.test(v), 'La cédula lleva de 5 a 12 caracteres, sin espacios.');
 
-/** EQ-02 · Alta de fisioterapeuta. El rol no viaja: siempre es `therapist`. */
+/**
+ * EQ-02 · Alta de una persona del equipo. AUTH-10 · El dueño elige entre fisioterapeuta y recepción;
+ * cualquier otro valor (por ejemplo `owner`) se toma como fisioterapeuta: aquí nunca se crea otro dueño.
+ */
 export const NewUser = z.object({
+  role: z.enum(['therapist', 'reception']).catch('therapist'),
   full_name: fullName,
   title: title.default(''),
   username,
@@ -65,7 +69,7 @@ export const PHYSICIAN_NEEDS_LICENSE =
 
 /** Columnas de `users` que pueden salir por la API. Nunca `password_hash`. */
 export type TeamUser = {
-  id: string; username: string; email: string; role: 'owner' | 'therapist'; full_name: string; title: string;
+  id: string; username: string; email: string; role: 'owner' | 'therapist' | 'reception'; full_name: string; title: string;
   display_name: string; specialty: string; location_id: string | null; location_name: string | null; phone: string;
   license_number: string | null; license_institution: string | null; specialty_license: string | null;
   is_physician: boolean; active: boolean; deactivated_at: Date | null; last_login_at: Date | null;

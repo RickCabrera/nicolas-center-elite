@@ -8,7 +8,7 @@ import { PdfBuilder, pdfResponse } from '@/lib/pdf';
 import { coveredPeriod } from '@/modules/billing/rules';
 
 // PAG-08 · Recibo de pago en PDF (no es comprobante fiscal).
-export const GET = route({ auth: 'owner' }, async ({ db, params }) => {
+export const GET = route({ auth: 'front' }, async ({ db, params }) => {
   if (!z.uuid().safeParse(params.id).success) throw notFound('Pago no encontrado.');
   const [p] = await db`
     select y.*, pt.full_name as patient_name, pt.record_number, l.name as location_name,

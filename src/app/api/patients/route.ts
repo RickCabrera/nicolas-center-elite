@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { paging, route } from '@/lib/api';
+import { isFrontDesk, paging, route } from '@/lib/api';
 import { badRequest } from '@/lib/errors';
 import { createInitialMembership } from '@/modules/billing/membership';
 import { catalogErrors, insertPatient, loadCatalogs, PatientFields, patientRuleErrors, requireActiveTherapist, throwIfFields } from '@/modules/patients/server';
@@ -19,8 +19,10 @@ const Query = z.preprocess(dropEmpty, z.object({
 }));
 
 // PAC-01 · Listado de pacientes con búsqueda y filtros. RLS deja al fisioterapeuta solo los suyos.
+// AUTH-10 · Recepción lista a todos, pero sin motivo de consulta ni etiquetas, y su búsqueda no toca lo clínico.
 export const GET = route({ auth: 'user', query: Query }, async ({ db, user, query }) => {
   const { limit, offset } = paging(query, 500, 60);
+  const reception = user.role === 'reception';
   const like = query.q ? '%' + query.q.replace(/[\\%_]/g, '\\$&') + '%' : null;
 
   const fStatus = query.status === 'all' ? db`` : db`and p.status = ${query.status}`;
@@ -29,23 +31,23 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
     : query.age === 'adultos' ? db`and age_years(p.birth_date) between 18 and 59`
     : query.age === 'mayores' ? db`and age_years(p.birth_date) >= 60`
     : db``;
-  const fTag = query.tag ? db`and exists (select 1 from unnest(p.tags) t where norm(t) = norm(${query.tag}))` : db``;
-  // El filtro por fisioterapeuta solo aplica al dueño; un fisioterapeuta siempre ve su propia carga.
-  const fTher = query.therapist_id && user.role === 'owner' ? db`and p.therapist_id = ${query.therapist_id}` : db``;
+  const fTag = query.tag && !reception ? db`and exists (select 1 from unnest(p.tags) t where norm(t) = norm(${query.tag}))` : db``;
+  // El filtro por fisioterapeuta aplica al dueño y a recepción; un fisioterapeuta siempre ve su propia carga.
+  const fTher = query.therapist_id && isFrontDesk(user) ? db`and p.therapist_id = ${query.therapist_id}` : db``;
   const fLoc = query.location_id ? db`and p.location_id = ${query.location_id}` : db``;
   // Busca sin acentos en nombre, motivo y expediente (columna `search`) y en el diagnóstico vigente.
-  const fSearch = like
-    ? db`and (p.search like norm(${like})
+  const fSearch = !like ? db``
+    : reception ? db`and norm(p.full_name || ' ' || p.record_number) like norm(${like})`
+    : db`and (p.search like norm(${like})
           or exists (select 1 from clinical_profiles cp
                      where cp.patient_id = p.id and norm(cp.diagnosis) like norm(${like})
-                       and cp.version = (select max(v.version) from clinical_profiles v where v.patient_id = p.id)))`
-    : db``;
+                       and cp.version = (select max(v.version) from clinical_profiles v where v.patient_id = p.id)))`;
   const where = db`where true ${fStatus} ${fAge} ${fTag} ${fTher} ${fLoc} ${fSearch}`;
 
   const items = await db`
     select p.id, p.record_number, p.full_name, p.birth_date, age_years(p.birth_date) as age, p.sex,
            p.location_id, l.name as location_name, p.therapist_id, trim(u.title || ' ' || u.full_name) as therapist_name,
-           p.reason, p.tags, p.status, b.plan_name, coalesce(b.state, 'sin_plan') as billing_state, b.next_due_date,
+           ${reception ? db`'' as reason, '{}'::text[] as tags` : db`p.reason, p.tags`}, p.status, b.plan_name, coalesce(b.state, 'sin_plan') as billing_state, b.next_due_date,
            p.fingerprint_enrolled_at
     from patients p
     join locations l on l.id = p.location_id
@@ -64,23 +66,26 @@ const Create = PatientFields.extend({
   plan_id: z.uuid('Selecciona la membresía.').nullish(),
 });
 
-// PAC-03 · Alta de paciente. PAC-04 · El fisioterapeuta siempre se autoasigna. PAC-06 · Membresía inicial.
+// PAC-03 · Alta de paciente. PAC-04 · El fisioterapeuta siempre se autoasigna; dueño y recepción eligen. PAC-06 · Membresía inicial.
 export const POST = route({ auth: 'user', body: Create }, async ({ db, user, body }) => {
   const { therapist_id, plan_id, ...data } = body;
+  // AUTH-10 · Recepción no captura motivo de consulta ni etiquetas: lo que mande en esos campos se ignora.
+  if (user.role === 'reception') { data.reason = ''; data.tags = []; }
   const cats = await loadCatalogs(db);
   const fields: Record<string, string> = { ...patientRuleErrors(data), ...catalogErrors(data, cats) };
   if (!data.sex) fields.sex = 'Selecciona el sexo.';
 
-  // Lo que mande el cliente como fisioterapeuta solo cuenta si quien da de alta es el dueño.
+  // Lo que mande el cliente como fisioterapeuta solo cuenta si quien da de alta es el dueño o recepción.
+  const front = isFrontDesk(user);
   let therapistId = user.id;
-  if (user.role === 'owner') {
+  if (front) {
     if (!therapist_id) fields.therapist_id = 'Selecciona el fisioterapeuta.';
     else if (!cats.therapists.some((t) => t.id === therapist_id)) fields.therapist_id = 'Elige un fisioterapeuta activo.';
     else therapistId = therapist_id;
   }
   if (plan_id && !cats.plans.some((p) => p.id === plan_id)) fields.plan_id = 'Ese plan no está disponible.';
   throwIfFields(fields);
-  if (user.role === 'owner') await requireActiveTherapist(db, therapistId);
+  if (front) await requireActiveTherapist(db, therapistId);
 
   const row = await insertPatient(db, data, therapistId, user.id);
   if (plan_id) {

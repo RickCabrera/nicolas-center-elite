@@ -9,7 +9,7 @@ const Body = z.object({
 });
 
 // PAC-05 · Baja con motivo y reactivación. Nunca se borra: el expediente se conserva y sigue accesible.
-export const POST = route({ auth: 'user', body: Body }, async ({ db, params, body, system, user }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, params, body, system, user }) => {
   const [p] = z.uuid().safeParse(params.id).success
     ? await db<{ id: string; status: string }[]>`select id, status from patients where id = ${params.id}`
     : [];

@@ -16,7 +16,8 @@ const Query = z.object({
   include_cancelled: z.enum(['0', '1']).optional(),
 });
 
-// AGE-01 / AGE-02 · Citas del rango, ordenadas por hora. RLS: el fisioterapeuta solo recibe las suyas.
+// AGE-01 / AGE-02 · Citas del rango, ordenadas por hora. RLS: el fisioterapeuta solo recibe las suyas;
+// el dueño y recepción, las de todos (AUTH-10).
 export const GET = route({ auth: 'user', query: Query }, async ({ db, query }) => {
   checkRange(query.from, query.to);
   const withCancelled = query.include_cancelled === '1' || query.status === 'cancelled';

@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose';
-import { asSystem, type Tx } from '../db';
+import { asSystem, type Role, type Tx } from '../db';
 import { env } from '../env';
 
 export const SESSION_COOKIE = 'nce_session';
@@ -9,7 +9,7 @@ const MAX_AGE_DAYS = 14;
 export type SessionUser = {
   id: string;
   session_id: string;
-  role: 'owner' | 'therapist';
+  role: Role;
   username: string;
   email: string;
   full_name: string;

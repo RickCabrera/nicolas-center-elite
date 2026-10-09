@@ -20,7 +20,7 @@ const Query = z.object({
  * EST-01 · Cada item trae `thumb_url` firmada (10 min) pero nunca la URL del archivo.
  * EST-06 · Los archivados solo salen con ?archived=1, y eso es exclusivo del dueño.
  */
-export const GET = route({ auth: 'user', query: Query }, async ({ db, user, query }) => {
+export const GET = route({ auth: 'clinical', query: Query }, async ({ db, user, query }) => {
   const archived = query.archived === '1';
   if (archived && user.role !== 'owner') throw forbidden('Solo el dueño puede ver los estudios archivados.');
   const { limit, offset } = paging(query, 200, 60);
@@ -59,7 +59,7 @@ const Body = z.object({
  * EST-02 · Paso 1 de la subida: valida, registra el estudio como `pending` y entrega el boleto para que
  * el navegador suba el archivo (y la miniatura) DIRECTO al almacenamiento privado.
  */
-export const POST = route({ auth: 'user', body: Body }, async ({ db, user, body }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, user, body }) => {
   const mime = allowedMime(body.file_name, body.mime);
   if (!mime) {
     const msg = 'Ese tipo de archivo no se admite. Sube JPG, PNG, WEBP, PDF o DICOM.';

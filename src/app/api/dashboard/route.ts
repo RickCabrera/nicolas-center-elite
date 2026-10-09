@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { route } from '@/lib/api';
+import { isFrontDesk, route } from '@/lib/api';
 import { fmtTime, longDate } from '@/lib/dates';
 import { shortName } from '@/lib/format';
 import { badRequest } from '@/lib/errors';
@@ -15,12 +15,14 @@ const Query = z.object({
  *   · citas de hoy           → no canceladas, por día LOCAL de la clínica (igual que la tira de la Agenda)
  *   · mensualidades          → patient_billing.state en (por_vencer, vencido) de pacientes activos
  *   · asistencias por huella → registros de hoy de personas identificadas (pacientes y personal)
- * El filtro por sede es solo del dueño (DASH-03); el fisioterapeuta ve las asistencias de SU sede.
+ * El filtro por sede es del dueño y de recepción (DASH-03); el fisioterapeuta ve las asistencias de SU sede.
+ * AUTH-10 · Recepción recibe el tablero del mostrador: citas de hoy de todos, pagos por vencer y vencidos y
+ * asistencias de hoy. Nada clínico.
  */
 export const GET = route({ auth: 'user', query: Query }, async ({ db, user, query }) => {
-  const owner = user.role === 'owner';
-  const loc = owner ? query.location_id ?? null : null;
-  let location_name = owner ? null : user.location_name;
+  const front = isFrontDesk(user);
+  const loc = front ? query.location_id ?? null : null;
+  let location_name = front ? null : user.location_name;
   if (loc) {
     const [l] = await db<{ name: string }[]>`select name from locations where id = ${loc}`;
     if (!l) throw badRequest('La sede no existe.', { location_id: 'La sede no existe.' });
@@ -30,7 +32,7 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
 
   const pLoc = loc ? db`and p.location_id = ${loc}` : db``;
   const aLoc = loc ? db`and a.location_id = ${loc}` : db``;
-  const attLoc = owner ? (loc ? db`and e.location_id = ${loc}` : db``)
+  const attLoc = front ? (loc ? db`and e.location_id = ${loc}` : db``)
     : user.location_id ? db`and e.location_id = ${user.location_id}` : db``;
 
   const [stats] = await db<{ patients_active: number; appointments_today: number; due: number; attendance_today: number }[]>`
@@ -52,14 +54,16 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
     where a.status <> 'cancelled' and mx_date(a.starts_at) = ${today}::date ${aLoc}
     order by a.starts_at, p.full_name limit 6`;
 
-  const attendance = await db<{ id: string; person_name: string; person_type: 'patient' | 'staff'; patient_id: string | null; location_name: string; occurred_at: Date; direction: 'in' | 'out' }[]>`
-    select e.id, e.person_name, e.person_type, e.patient_id, l.name as location_name, e.occurred_at, e.direction
-    from attendance_events e join locations l on l.id = e.location_id
+  const attendance = await db<{ id: string; person_name: string; person_type: 'patient' | 'staff'; patient_id: string | null; location_name: string; occurred_at: Date; direction: 'in' | 'out'; role_label: string }[]>`
+    select e.id, e.person_name, e.person_type, e.patient_id, l.name as location_name, e.occurred_at, e.direction,
+           case e.person_type when 'patient' then 'Paciente'
+             else case su.role when 'owner' then 'Dirección' when 'reception' then 'Recepción' else 'Fisioterapeuta' end end as role_label
+    from attendance_events e join locations l on l.id = e.location_id left join users su on su.id = e.user_id
     where mx_date(e.occurred_at) = ${today}::date and e.person_type <> 'unknown' ${attLoc}
     order by e.occurred_at desc limit 5`;
 
-  // Los pagos son del dueño: el fisioterapeuta recibe solo el conteo de SUS pacientes, sin el detalle.
-  const due_payments = owner
+  // Los pagos son del dueño y de recepción: el fisioterapeuta recibe solo el conteo de SUS pacientes, sin el detalle.
+  const due_payments = front
     ? await db`
         select p.id as patient_id, p.full_name, b.plan_name, b.next_due_date, b.state
         from patients p join patient_billing b on b.patient_id = p.id
@@ -70,13 +74,11 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
   return {
     today,
     date_label: longDate(today),
-    location_id: owner ? loc : user.location_id,
+    location_id: front ? loc : user.location_id,
     location_name,
     stats,
     today_appointments: appts.map(({ therapist, ...a }) => ({ ...a, time: fmtTime(a.starts_at), therapist_name: shortName(therapist) })),
-    recent_attendance: attendance.map((e) => ({
-      ...e, time: fmtTime(e.occurred_at), role_label: e.person_type === 'patient' ? 'Paciente' : 'Fisioterapeuta',
-    })),
-    ...(owner ? { due_payments } : {}),
+    recent_attendance: attendance.map((e) => ({ ...e, time: fmtTime(e.occurred_at) })),
+    ...(front ? { due_payments } : {}),
   };
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { route } from '@/lib/api';
+import { isFrontDesk, route } from '@/lib/api';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/errors';
 import { localToInstant, todayIso } from '@/lib/dates';
 import { attendanceSelect, type AttendanceItem } from '@/modules/attendance/server';
@@ -16,10 +16,15 @@ const Query = z.object({
 
 /**
  * HUE-10 / HUE-15 · Asistencias de un día (hoy por defecto) o el historial de una persona.
- * RLS: el fisioterapeuta ve las de su sede y las de sus pacientes. Los "no reconocidos" son solo del dueño.
+ * RLS: el fisioterapeuta ve las de su sede y las de sus pacientes. Los "no reconocidos" son del dueño y de recepción.
+ * AUTH-10 · Recepción ve el día en vivo de todas las sedes, pero no el historial de asistencia de otra persona del
+ * equipo (eso es el reporte de horas del personal, que es del dueño).
  * Cada asistencia de paciente trae `billing_state` para avisar de una membresía vencida.
  */
 export const GET = route({ auth: 'user', query: Query }, async ({ db, user, query }) => {
+  if (user.role === 'reception' && query.user_id && query.user_id !== user.id) {
+    throw forbidden('El historial de asistencia del personal es solo para el dueño.');
+  }
   const byPerson = !!(query.patient_id || query.user_id);
   const date = query.date ?? (byPerson ? null : todayIso());
   const where = db`
@@ -29,7 +34,7 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
       ${query.role !== 'all' ? db`and e.person_type = ${query.role}` : db``}
       ${query.patient_id ? db`and e.patient_id = ${query.patient_id}` : db``}
       ${query.user_id ? db`and e.user_id = ${query.user_id}` : db``}
-      ${user.role === 'owner' ? db`` : db`and e.person_type <> 'unknown'`}`;
+      ${isFrontDesk(user) ? db`` : db`and e.person_type <> 'unknown'`}`;
   const items = await db<AttendanceItem[]>`${attendanceSelect(db)} ${where} order by e.occurred_at desc, e.created_at desc limit ${query.limit}`;
   const [{ total }] = await db<{ total: number }[]>`select count(*)::int as total from attendance_events e ${where}`;
   return { date, total, items };
@@ -45,17 +50,18 @@ const Body = z.object({
 
 /**
  * HUE-11 · Registro manual de asistencia (el lector falló, la persona no tiene huella…).
- * Motivo obligatorio y queda en la bitácora. El dueño registra a cualquiera; el fisioterapeuta solo
- * a sus pacientes y solo en su sede.
+ * Motivo obligatorio y queda en la bitácora. El dueño registra a cualquiera; recepción, a cualquier paciente
+ * en cualquier sede (AUTH-10); el fisioterapeuta solo a sus pacientes y solo en su sede.
  */
 export const POST = route({ auth: 'user', body: Body }, async ({ db, user, body, system }) => {
   const owner = user.role === 'owner';
+  const front = isFrontDesk(user);
   let location: string | null;
   if (body.person_type === 'patient') {
     const [p] = await db<{ id: string; location_id: string; status: string }[]>`select id, location_id, status from patients where id = ${body.person_id}`;
     if (!p) throw notFound('Paciente no encontrado.');
     if (p.status !== 'active') throw conflict('El paciente está dado de baja.');
-    location = owner ? (body.location_id ?? p.location_id) : (user.location_id ?? p.location_id);
+    location = front ? (body.location_id ?? p.location_id) : (user.location_id ?? p.location_id);
   } else {
     if (!owner) throw forbidden('Solo el dueño puede registrar a mano la asistencia del personal.');
     const [u] = await db<{ id: string; location_id: string | null; active: boolean }[]>`select id, location_id, active from users where id = ${body.person_id}`;

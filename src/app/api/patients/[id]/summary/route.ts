@@ -13,7 +13,7 @@ type Note = {
 };
 
 // EXP-07 · Resumen clínico en PDF con membrete de la clínica y la sede. Deja un evento `export` en la bitácora.
-export const GET = route({ auth: 'user' }, async ({ db, user, params }) => {
+export const GET = route({ auth: 'clinical' }, async ({ db, user, params }) => {
   const patient = await requirePatient(db, params.id);
   const [clinic] = await db<{ name: string; tagline: string | null }[]>`select name, tagline from clinic`;
   const [profile] = await db<{

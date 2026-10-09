@@ -10,6 +10,8 @@ import { readSession, SESSION_COOKIE, type SessionUser } from './auth/session';
  *   export const GET = route({ auth: 'user', query: Q }, async ({ db, user, query }) => { ... return datos; });
  *
  * · auth: 'user' (cualquier sesión) · 'owner' (solo dueño) · 'public' (sin sesión; la ruta valida lo suyo)
+ *         'front' (dueño o recepción: lo administrativo y de cobranza) · 'clinical' (dueño o fisioterapeuta:
+ *         el expediente clínico; recepción recibe 403 aunque RLS ya no le entregue filas) (AUTH-10)
  * · body / query: esquemas zod; un dato inválido responde 400 señalando el campo.
  * · db: transacción abierta. Con sesión corre bajo RLS a nombre del usuario; en 'public' es de sistema.
  * · system(fn): transacción aparte SIN RLS para lo que el usuario no puede tocar directo
@@ -29,7 +31,7 @@ export type RouteCtx<B, Q> = {
 };
 
 type Options<B, Q> = {
-  auth?: 'user' | 'owner' | 'public';
+  auth?: 'user' | 'owner' | 'front' | 'clinical' | 'public';
   body?: ZodType<B>;
   query?: ZodType<Q>;
   /** Permite usar la ruta aunque el usuario deba cambiar su contraseña. */
@@ -44,6 +46,10 @@ export const fail = (status: number, code: string, message: string, fields?: Rec
   NextResponse.json({ ok: false, error: { code, message, ...(fields ? { fields } : {}) } } satisfies ApiErr, { status });
 
 const ANON = { id: '', role: 'therapist' } as unknown as SessionUser;
+
+/** AUTH-10 · Mostrador: el dueño o recepción. */
+export const isFrontDesk = (u: { role: string }) => u.role === 'owner' || u.role === 'reception';
+export const NO_CLINICAL = 'Recepción no tiene acceso a la información clínica del expediente.';
 
 export function route<B = unknown, Q = Record<string, string>>(
   opts: Options<B, Q>,
@@ -69,6 +75,8 @@ export function route<B = unknown, Q = Record<string, string>>(
         const u = await readSession(req.cookies.get(SESSION_COOKIE)?.value);
         if (!u) throw unauthorized();
         if (auth === 'owner' && u.role !== 'owner') throw forbidden('Esta sección es solo para el dueño.');
+        if (auth === 'front' && !isFrontDesk(u)) throw forbidden('Esta sección es solo para el dueño y recepción.');
+        if (auth === 'clinical' && u.role === 'reception') throw forbidden(NO_CLINICAL);
         if (u.must_change_password && !opts.allowPendingPassword) {
           throw new AppError(403, 'password_change_required', 'Debes cambiar tu contraseña antes de continuar.');
         }

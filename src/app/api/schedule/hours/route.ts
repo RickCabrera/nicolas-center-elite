@@ -21,8 +21,8 @@ const Body = z.object({
   hours: z.array(z.object({ weekday: z.number().int().min(0).max(6), start_time: TimeStr, end_time: TimeStr })).max(28),
 });
 
-// AGE-07 · Reemplaza el horario completo. El dueño edita el de cualquiera; el fisioterapeuta solo el suyo.
-export const PUT = route({ auth: 'user', body: Body }, async ({ db, user, body }) => {
+// AGE-07 · Reemplaza el horario completo. El dueño edita el de cualquiera; el fisioterapeuta solo el suyo; recepción solo lo consulta.
+export const PUT = route({ auth: 'clinical', body: Body }, async ({ db, user, body }) => {
   assertScheduleOwner(user, body.user_id);
   const [u] = await db`select id from users where id = ${body.user_id}`;
   if (!u) throw notFound('Usuario no encontrado.');

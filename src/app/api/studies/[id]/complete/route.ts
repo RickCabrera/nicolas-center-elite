@@ -7,7 +7,7 @@ import { findStudy, publicStudy } from '@/modules/studies/server';
  * EST-02 · Paso 3 de la subida: comprueba en el almacenamiento que el archivo realmente llegó, guarda su
  * tamaño real, descarta la miniatura si no se subió y deja el estudio `ready` (hasta entonces no se lista).
  */
-export const POST = route({ auth: 'user' }, async ({ db, params }) => {
+export const POST = route({ auth: 'clinical' }, async ({ db, params }) => {
   const row = await findStudy(db, params.id);
   if (!row) throw notFound('Estudio no encontrado.');
   if (row.status === 'ready') return publicStudy(row); // repetir la llamada no cambia nada

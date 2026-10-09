@@ -5,7 +5,7 @@ import { pdfResponse } from '@/lib/pdf';
 import { buildDocumentPdf, loadDocument } from '@/modules/documents/server';
 
 // REC-08 · PDF en hoja carta con el mismo contenido que la vista (sello CANCELADO si aplica).
-export const GET = route({ auth: 'user' }, async ({ db, user, params, query }) => {
+export const GET = route({ auth: 'clinical' }, async ({ db, user, params, query }) => {
   const doc = await loadDocument(db, params.id, user);
   if (!doc) throw notFound('Documento no encontrado.');
   const bytes = await buildDocumentPdf(doc);

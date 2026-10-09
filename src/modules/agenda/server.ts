@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { errorResponse } from '@/lib/api';
+import { errorResponse, isFrontDesk } from '@/lib/api';
 import type { SessionUser } from '@/lib/auth/session';
 import type { Tx } from '@/lib/db';
 import { addDays, localToInstant, parseDateInput, todayIso, weekday } from '@/lib/dates';
@@ -58,17 +58,18 @@ type Who = { patient_id: string; therapist_id: string; location_id: string };
 
 /**
  * Resuelve paciente, fisioterapeuta y sede de una cita (AGE-01).
- * El fisioterapeuta siempre agenda a su nombre, aunque el cliente mande otro; el dueño elige (por defecto, el asignado).
+ * El fisioterapeuta siempre agenda a su nombre, aunque el cliente mande otro; el dueño y recepción eligen
+ * (por defecto, el asignado al paciente) (AUTH-10).
  */
 export async function resolveWho(db: Tx, user: SessionUser, patientId: string, therapistId?: string | null): Promise<Who> {
   const [p] = await db<{ id: string; therapist_id: string; location_id: string; status: string }[]>`
     select id, therapist_id, location_id, status from patients where id = ${patientId}`;      // RLS: ajeno = no existe
   if (!p) throw notFound('Paciente no encontrado.');
   if (p.status !== 'active') throw badRequest('El paciente está dado de baja: reactívalo para agendarle.', { patient_id: 'Paciente dado de baja.' });
-  const tid = user.role === 'owner' ? (therapistId || p.therapist_id) : user.id;
-  const [t] = await db<{ id: string; location_id: string | null; active: boolean }[]>`
-    select id, location_id, active from users where id = ${tid}`;
-  if (!t) throw badRequest('Fisioterapeuta no encontrado.', { therapist_id: 'Fisioterapeuta no encontrado.' });
+  const tid = isFrontDesk(user) ? (therapistId || p.therapist_id) : user.id;
+  const [t] = await db<{ id: string; location_id: string | null; active: boolean; role: string }[]>`
+    select id, location_id, active, role from users where id = ${tid}`;
+  if (!t || t.role === 'reception') throw badRequest('Fisioterapeuta no encontrado.', { therapist_id: 'Fisioterapeuta no encontrado.' });
   if (!t.active) throw badRequest('Ese fisioterapeuta está desactivado.', { therapist_id: 'Fisioterapeuta desactivado.' });
   return { patient_id: p.id, therapist_id: t.id, location_id: t.location_id ?? p.location_id };
 }
@@ -139,7 +140,7 @@ export async function insertSeries(db: Tx, user: SessionUser, base: Omit<NewAppt
   return { series_id: seriesId, created, conflicts };
 }
 
-/** Permiso sobre el horario/bloqueos de un usuario: el dueño cualquiera; el fisioterapeuta solo el suyo. */
+/** Permiso sobre el horario/bloqueos de un usuario: el dueño cualquiera; el fisioterapeuta solo el suyo. Recepción, ninguno (la ruta ya respondió 403). */
 export function assertScheduleOwner(user: SessionUser, userId: string) {
   if (user.role !== 'owner' && userId !== user.id) throw forbidden('Solo puedes modificar tu propio horario.');
 }

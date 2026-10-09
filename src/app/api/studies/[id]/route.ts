@@ -11,7 +11,7 @@ import { FILE_URL_TTL, findStudy, publicStudy } from '@/modules/studies/server';
  * ve el estudio; solo entonces se firman `file_url` y `download_url` (5 minutos). Cada entrega queda
  * en la bitácora como acceso (`view`). Un archivado solo lo abre el dueño (EST-06).
  */
-export const GET = route({ auth: 'user' }, async ({ db, user, params }) => {
+export const GET = route({ auth: 'clinical' }, async ({ db, user, params }) => {
   const row = await findStudy(db, params.id);
   if (!row || row.status !== 'ready' || (row.archived_at && user.role !== 'owner')) throw notFound('Estudio no encontrado.');
   const [file_url, download_url] = await Promise.all([
@@ -29,7 +29,7 @@ const Patch = z.object({
 });
 
 // Corrige los metadatos (nombre, tipo, fecha). El archivo no cambia; el cambio queda en la bitácora por trigger.
-export const PATCH = route({ auth: 'user', body: Patch }, async ({ db, user, params, body }) => {
+export const PATCH = route({ auth: 'clinical', body: Patch }, async ({ db, user, params, body }) => {
   const row = await findStudy(db, params.id);
   if (!row || row.status !== 'ready' || (row.archived_at && user.role !== 'owner')) throw notFound('Estudio no encontrado.');
   if (body.study_date && body.study_date > todayIso()) {
