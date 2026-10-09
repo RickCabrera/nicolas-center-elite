@@ -2,7 +2,7 @@
  * DB-12 · Base de demostración: los 11 pacientes, 4 fisioterapeutas, citas y asistencias del mockup,
  * con fechas relativas a hoy. Solo para desarrollo y staging: se niega a correr en producción.
  *
- *   pnpm db:reset && pnpm db:seed        Usuarios: nicolas.h, m.reyes, d.salinas, k.ocampo, a.pineda
+ *   pnpm db:reset && pnpm db:seed        Usuarios: nicolas.h, m.reyes, d.salinas, k.ocampo, a.pineda, r.morales (recepción)
  *                                         Contraseña de todos: Elite2026demo
  */
 import { readFileSync, existsSync } from 'node:fs';
@@ -97,6 +97,11 @@ await asSystem(async (tx) => {
     await tx`insert into therapist_hours (user_id, weekday, start_time, end_time) values (${u.id}, 6, '08:00', '14:00')`;
   }
 
+  // AUTH-10 · Recepción: atiende el mostrador de Córdoba. Sin cédula, sin especialidad y sin horario de citas.
+  await tx`
+    insert into users (username, email, password_hash, role, full_name, location_id, phone)
+    values ('r.morales', 'r.morales@nicolascenterelite.mx', ${hash}, 'reception', 'Rocío Morales', ${locs.COR}, '271 000 0000')`;
+
   const [device] = await tx<{ id: string }[]>`
     insert into devices (name, location_id, model, serial, firmware, host, webhook_token_hash, webhook_token_enc, bridge_token_hash, bridge_token_enc)
     values ('Recepción Córdoba', ${locs.COR}, 'DS-K1T321EFWX-B', 'DEMO-0001', 'V3.9.50', '192.168.80.212',
@@ -184,5 +189,5 @@ await asSystem(async (tx) => {
   }
 });
 
-console.log(`Base de demostración lista.\n  Dueño:           nicolas.h\n  Fisioterapeutas: m.reyes (médico), d.salinas, k.ocampo, a.pineda\n  Contraseña:      ${PASSWORD}`);
+console.log(`Base de demostración lista.\n  Dueño:           nicolas.h\n  Fisioterapeutas: m.reyes (médico), d.salinas, k.ocampo, a.pineda\n  Recepción:       r.morales\n  Contraseña:      ${PASSWORD}`);
 await closeDb();
