@@ -21,7 +21,16 @@ if (data) {
     console.log(`El bucket "${bucket}" era público: se cambió a privado.`);
   } else console.log(`Bucket privado "${bucket}" listo.`);
 } else {
-  const r = await sb.storage.createBucket(bucket, { public: false, fileSizeLimit: '200MB' });
-  if (r.error) { console.error(`No se pudo crear el bucket: ${r.error.message}`, error?.message ?? ''); process.exit(1); }
-  console.log(`Bucket privado "${bucket}" creado.`);
+  // 200 MB por archivo (estudios DICOM). El plan gratuito de Supabase limita a 50 MB por archivo y rechaza
+  // un límite mayor: en ese caso se crea sin límite propio y aplica el del plan.
+  let r = await sb.storage.createBucket(bucket, { public: false, fileSizeLimit: '200MB' });
+  if (r.error) {
+    console.warn(`Aviso: no se aceptó el límite de 200 MB (${r.error.message}); se crea con el límite del plan.`);
+    r = await sb.storage.createBucket(bucket, { public: false });
+  }
+  if (r.error) {
+    // No se detiene la publicación: la app funciona y solo fallarán las subidas de archivos hasta resolverlo.
+    console.warn(`AVISO: no se pudo crear el bucket "${bucket}": ${r.error.message} ${error?.message ?? ''}`);
+    console.warn('Revisa SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY (llave "service_role" de la pestaña Legacy).');
+  } else console.log(`Bucket privado "${bucket}" creado.`);
 }
