@@ -1,0 +1,10 @@
+{
+  "eventType": "AccessControllerEvent",
+  "dateTime": "2026-10-07T15:17:03",
+  "majorEventType": 5,
+  "subEventType": 1,
+  "employeeNo": 1002,
+  "serialNo": "190",
+  "currentVerifyMode": "card",
+  "deviceName": "Recepcion"
+}

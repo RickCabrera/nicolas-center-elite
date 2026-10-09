@@ -1,0 +1,12 @@
+{
+  "ipAddress": "192.168.80.212",
+  "portNo": 80,
+  "protocol": "HTTP",
+  "macAddress": "a4:d5:c2:00:11:22",
+  "channelID": 1,
+  "dateTime": "2026-10-07T15:20:00-06:00",
+  "activePostCount": 1,
+  "eventType": "heartBeat",
+  "eventState": "active",
+  "eventDescription": "heartBeat"
+}

@@ -1,0 +1,7 @@
+# Valores de ejemplo y de pruebas que no son secretos reales.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valores de desarrollo y pruebas"
+paths = ['''\.env\.example$''', '''^tests/''', '''^\.github/workflows/ci\.yml$''', '''^bridge/config\.example\.json$''', '''^bridge/mock-device\.mjs$''']

@@ -1,0 +1,8 @@
+<EventNotificationAlert version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<ipAddress>192.168.80.212</ipAddress>
+<dateTime>2026-10-07T15:20:10-06:00</dateTime>
+<activePostCount>0</activePostCount>
+<eventType>videoloss</eventType>
+<eventState>inactive</eventState>
+<eventDescription>videoloss alarm</eventDescription>
+</EventNotificationAlert>

@@ -1,0 +1,19 @@
+{
+  "ipAddress": "192.168.80.212",
+  "portNo": 80,
+  "protocol": "HTTP",
+  "macAddress": "a4:d5:c2:00:11:22",
+  "channelID": 1,
+  "dateTime": "2026-10-07T15:17:05-06:00",
+  "activePostCount": 1,
+  "eventType": "AccessControllerEvent",
+  "eventState": "active",
+  "eventDescription": "Access Controller Event",
+  "AccessControllerEvent": {
+    "deviceName": "Access Controller",
+    "majorEventType": 5,
+    "subEventType": 21,
+    "doorNo": 1,
+    "serialNo": 189
+  }
+}

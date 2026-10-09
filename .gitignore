@@ -1,0 +1,15 @@
+node_modules
+.next
+.env
+.env.local
+.env.*.local
+.data
+test-results
+playwright-report
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+bridge/config.json
+bridge/state.json
+respaldos
+bridge/probe-report.json

@@ -1,0 +1,46 @@
+{
+  "multipart-access-with-photo.bin": {
+    "contentType": "multipart/form-data; boundary=MIME_boundary",
+    "nota": "Evento de huella correcta + foto JPEG (la foto se ignora)."
+  },
+  "multipart-named-part-lf.bin": {
+    "contentType": "multipart/form-data; boundary=\"MIME_boundary\"",
+    "nota": "Parte llamada AccessControllerEvent, saltos LF, rostro (75), personal."
+  },
+  "json-access.json": {
+    "contentType": "application/json",
+    "nota": "JSON directo."
+  },
+  "json-flat-no-zone.json": {
+    "contentType": "application/json; charset=UTF-8",
+    "nota": "Plano, employeeNo numérico, fecha sin zona, tarjeta (1)."
+  },
+  "xml-access.xml": {
+    "contentType": "application/xml; charset=\"UTF-8\"",
+    "nota": "EventNotificationAlert en XML."
+  },
+  "heartbeat.json": {
+    "contentType": "application/json",
+    "nota": "Latido."
+  },
+  "heartbeat-videoloss.xml": {
+    "contentType": "text/xml",
+    "nota": "videoloss inactivo usado como latido."
+  },
+  "door-open.json": {
+    "contentType": "application/json",
+    "nota": "Puerta abierta (21): no es asistencia."
+  },
+  "multipart-fingerprint-not-recognized.bin": {
+    "contentType": "multipart/form-data; boundary=MIME_boundary",
+    "nota": "Huella no reconocida (39): no es asistencia."
+  },
+  "malformed.json": {
+    "contentType": "application/json",
+    "nota": "JSON truncado."
+  },
+  "malformed-multipart.bin": {
+    "contentType": "multipart/form-data; boundary=MIME_boundary",
+    "nota": "Límite que no coincide y contenido inválido."
+  }
+}

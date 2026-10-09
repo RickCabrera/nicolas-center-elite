@@ -1,0 +1,54 @@
+# INF-06 · Cada push y pull request: lint, tipos, pruebas (unitarias, base de datos/RLS, API, agente puente),
+# build de producción y escaneo de secretos (LEG-04). Si cualquier paso falla, el pipeline falla.
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nce_admin
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: nce_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U nce_admin" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://nce_admin:dev@localhost:5432/nce_test
+      DATABASE_URL: postgres://nce_admin:dev@localhost:5432/nce_test
+      SESSION_SECRET: secreto-de-ci-con-mas-de-treinta-y-dos-caracteres
+      ENCRYPTION_KEY: llave-de-ci-para-cifrado
+      APP_URL: http://localhost:3000
+      APP_ENV: development
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Tipos
+        run: pnpm typecheck
+      - name: Pruebas (unitarias, base de datos y RLS, API)
+        run: pnpm test
+      - name: Pruebas del agente puente (contra el lector simulado)
+        run: npx vitest run -c vitest.bridge.config.ts
+      - name: Build de producción
+        run: pnpm build
+
+  secretos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

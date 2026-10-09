@@ -1,0 +1,5 @@
+--MIME_boundary
+Content-Disposition: form-data; name="event_log"
+
+{"ipAddress":"192.168.80.212","portNo":80,"protocol":"HTTP","macAddress":"a4:d5:c2:00:11:22","channelID":1,"dateTime":"2026-10-07T15:18:40-06:00","activePostCount":1,"eventType":"AccessControllerEvent","eventState":"active","eventDescription":"Access Controller Event","AccessControllerEvent":{"deviceName":"Access Controller","majorEventType":5,"subEventType":39,"cardReaderNo":1,"serialNo":191,"currentVerifyMode":"cardOrFaceOrFp"}}
+--MIME_boundary--
