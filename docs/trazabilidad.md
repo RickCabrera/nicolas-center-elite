@@ -55,9 +55,10 @@ Una tarea sin pruebas listadas se verificó por revisión visual o es documentac
 | AUTH-04 | `src/app/(auth)/login/page.tsx`<br>`src/app/api/auth/passkeys/[id]/route.ts`<br>`src/app/api/auth/passkeys/login-options/route.ts`<br>`src/app/api/auth/passkeys/register-options/route.ts`<br>`src/app/api/auth/passkeys/register-verify/route.ts`<br>`src/modules/profile/security-cards.tsx` | — |
 | AUTH-05 | `db/migrations/0005_audit_rls.sql` | `tests/db/schema.test.ts` |
 | AUTH-06 | — | `tests/api/studies.test.ts` |
-| AUTH-07 | `src/app/(app)/(owner)/layout.tsx`<br>`src/components/shell.tsx` | — |
+| AUTH-07 | `src/app/(app)/(owner)/layout.tsx`<br>`src/components/no-access.tsx`<br>`src/components/shell.tsx` | — |
 | AUTH-08 | `src/lib/auth/password.ts`<br>`src/lib/auth/session.ts` | — |
 | AUTH-09 | `src/app/api/users/[id]/deactivate/route.ts`<br>`src/modules/team/deactivate-wizard.tsx` | `tests/api/team.test.ts` |
+| AUTH-10 | `CONVENTIONS.md`<br>`db/migrations/0013_reception_role.sql`<br>`scripts/seed-demo.ts`<br>`src/app/(app)/(clinical)/layout.tsx`<br>`src/app/(app)/(front)/layout.tsx`<br>`src/app/(app)/(front)/mensualidades/page.tsx`<br>(+35) | `tests/api/reception.test.ts`<br>`tests/db/reception.test.ts`<br>`tests/e2e/flujos.spec.ts`<br>`tests/helpers.ts` |
 
 ## PAC
 
@@ -94,7 +95,7 @@ Una tarea sin pruebas listadas se verificó por revisión visual o es documentac
 | --- | --- | --- |
 | EST-01 | `src/app/api/studies/[id]/route.ts`<br>`src/app/api/studies/route.ts`<br>`src/lib/storage/index.ts`<br>`src/modules/studies/server.ts`<br>`src/modules/studies/types.ts`<br>`src/modules/studies/viewer.tsx` | `tests/api/studies.test.ts` |
 | EST-02 | `src/app/api/studies/[id]/complete/route.ts`<br>`src/app/api/studies/route.ts`<br>`src/modules/studies/file-rules.ts`<br>`src/modules/studies/patient-studies.tsx`<br>`src/modules/studies/server.ts`<br>`src/modules/studies/upload-sheet.tsx` | `tests/api/studies.test.ts`<br>`tests/unit/dicom.test.ts` |
-| EST-03 | `src/app/(app)/estudios/page.tsx`<br>`src/app/api/studies/route.ts`<br>`src/modules/studies/study-card.tsx` | `tests/api/studies.test.ts` |
+| EST-03 | `src/app/(app)/(clinical)/estudios/page.tsx`<br>`src/app/api/studies/route.ts`<br>`src/modules/studies/study-card.tsx` | `tests/api/studies.test.ts` |
 | EST-04 | `src/modules/studies/dicom.ts`<br>`src/modules/studies/patient-studies.tsx`<br>`src/modules/studies/viewer.tsx` | `tests/unit/dicom.test.ts` |
 | EST-05 | `src/app/api/studies/route.ts`<br>`src/modules/studies/study-card.tsx`<br>`src/modules/studies/thumbs.ts`<br>`src/modules/studies/upload-sheet.tsx` | — |
 | EST-06 | `src/app/api/studies/[id]/archive/route.ts`<br>`src/app/api/studies/[id]/route.ts`<br>`src/app/api/studies/route.ts`<br>`src/modules/studies/viewer.tsx` | `tests/api/studies.test.ts` |
@@ -124,8 +125,8 @@ Una tarea sin pruebas listadas se verificó por revisión visual o es documentac
 | REC-05 | `db/migrations/0003_operations.sql`<br>`src/app/api/documents/[id]/cancel/route.ts`<br>`src/app/api/documents/route.ts`<br>`src/modules/documents/server.ts` | `tests/api/documents.test.ts` |
 | REC-06 | `db/migrations/0003_operations.sql`<br>`src/app/api/documents/controlled/route.ts`<br>`src/app/api/documents/route.ts`<br>`src/modules/documents/new-document-sheet.tsx` | `tests/api/documents.test.ts` |
 | REC-07 | `src/modules/documents/new-document-sheet.tsx` | `tests/e2e/flujos.spec.ts` |
-| REC-08 | `src/app/(app)/recetas/[id]/page.tsx`<br>`src/app/api/documents/[id]/pdf/route.ts`<br>`src/app/api/documents/[id]/print/route.ts`<br>`src/app/api/documents/[id]/route.ts`<br>`src/lib/pdf.ts`<br>`src/modules/documents/document-paper.tsx`<br>(+2) | `tests/api/documents.test.ts` |
-| REC-09 | `src/app/(app)/recetas/page.tsx`<br>`src/app/api/documents/route.ts`<br>`src/modules/documents/document-row.tsx` | `tests/api/documents.test.ts` |
+| REC-08 | `src/app/(app)/(clinical)/recetas/[id]/page.tsx`<br>`src/app/api/documents/[id]/pdf/route.ts`<br>`src/app/api/documents/[id]/print/route.ts`<br>`src/app/api/documents/[id]/route.ts`<br>`src/lib/pdf.ts`<br>`src/modules/documents/document-paper.tsx`<br>(+2) | `tests/api/documents.test.ts` |
+| REC-09 | `src/app/(app)/(clinical)/recetas/page.tsx`<br>`src/app/api/documents/route.ts`<br>`src/modules/documents/document-row.tsx` | `tests/api/documents.test.ts` |
 | REC-10 | `src/app/api/documents/route.ts`<br>`src/modules/documents/document-row.tsx`<br>`src/modules/documents/patient-documents.tsx` | `tests/api/documents.test.ts` |
 
 ## PAG
@@ -137,13 +138,13 @@ Una tarea sin pruebas listadas se verificó por revisión visual o es documentac
 | PAG-03 | `db/migrations/0003_operations.sql`<br>`db/migrations/0004_functions.sql`<br>`src/app/api/billing/route.ts`<br>`src/app/api/cron/daily/route.ts`<br>`src/modules/billing/rules.ts` | `tests/api/billing.test.ts`<br>`tests/api/settings.test.ts` |
 | PAG-04 | `src/app/api/billing/payments/route.ts`<br>`src/modules/billing/payment-sheet.tsx`<br>`src/modules/billing/rules.ts`<br>`src/modules/billing/server.ts` | `tests/api/billing.test.ts`<br>`tests/unit/billing.test.ts` |
 | PAG-05 | `db/migrations/0003_operations.sql`<br>`src/app/api/billing/payments/[id]/void/route.ts`<br>`src/modules/billing/membership-panel.tsx`<br>`src/modules/billing/rules.ts`<br>`src/modules/billing/server.ts` | `tests/api/billing.test.ts`<br>`tests/unit/billing.test.ts` |
-| PAG-06 | `src/app/(app)/(owner)/mensualidades/page.tsx`<br>`src/app/api/billing/route.ts`<br>`src/modules/billing/payment-sheet.tsx` | `tests/api/billing.test.ts` |
+| PAG-06 | `src/app/(app)/(front)/mensualidades/page.tsx`<br>`src/app/api/billing/route.ts`<br>`src/modules/billing/payment-sheet.tsx` | `tests/api/billing.test.ts` |
 | PAG-07 | `db/migrations/0004_functions.sql` | `tests/api/billing.test.ts` |
 | PAG-08 | `src/app/api/billing/payments/[id]/receipt/route.ts`<br>`src/lib/pdf.ts`<br>`src/modules/billing/payment-sheet.tsx`<br>`src/modules/billing/rules.ts` | `tests/api/billing.test.ts` |
 | PAG-09 | `src/app/api/billing/memberships/[patientId]/route.ts`<br>`src/modules/billing/plan-picker-sheet.tsx`<br>`src/modules/billing/rules.ts`<br>`src/modules/billing/server.ts` | `tests/api/billing.test.ts`<br>`tests/unit/billing.test.ts` |
-| PAG-10 | `src/app/(app)/(owner)/mensualidades/page.tsx`<br>`src/app/api/billing/report/route.ts`<br>`src/modules/billing/income-report.tsx`<br>`src/modules/billing/rules.ts` | `tests/api/billing.test.ts` |
+| PAG-10 | `src/app/(app)/(front)/mensualidades/page.tsx`<br>`src/app/api/billing/report/route.ts`<br>`src/modules/billing/income-report.tsx`<br>`src/modules/billing/rules.ts` | `tests/api/billing.test.ts` |
 | PAG-11 | `db/migrations/0003_operations.sql`<br>`src/app/api/plans/[id]/route.ts` | `tests/api/billing.test.ts` |
-| PAG-12 | `src/app/(app)/(owner)/mensualidades/page.tsx`<br>`src/app/api/billing/payment-links/[id]/route.ts`<br>`src/app/api/billing/payment-links/route.ts`<br>`src/app/api/billing/settings/route.ts`<br>`src/app/api/webhooks/stripe/route.ts`<br>`src/app/pago/cancelado/page.tsx`<br>(+6) | `tests/api/online-billing.test.ts` |
+| PAG-12 | `src/app/(app)/(front)/mensualidades/page.tsx`<br>`src/app/api/billing/payment-links/[id]/route.ts`<br>`src/app/api/billing/payment-links/route.ts`<br>`src/app/api/billing/settings/route.ts`<br>`src/app/api/webhooks/stripe/route.ts`<br>`src/app/pago/cancelado/page.tsx`<br>(+6) | `tests/api/online-billing.test.ts` |
 
 ## HUE
 
@@ -243,5 +244,5 @@ Una tarea sin pruebas listadas se verificó por revisión visual o es documentac
 | FAC-03 | `src/app/api/invoices/global/route.ts`<br>`src/modules/invoicing/invoices-tab.tsx`<br>`src/modules/invoicing/server.ts` | `tests/api/online-billing.test.ts` |
 | FAC-04 | `src/app/api/invoices/[id]/route.ts`<br>`src/modules/invoicing/invoices-tab.tsx`<br>`src/modules/invoicing/server.ts` | `tests/api/online-billing.test.ts` |
 | FAC-05 | `src/app/api/billing/settings/route.ts`<br>`src/modules/invoicing/billing-settings-tab.tsx` | — |
-| FAC-06 | `src/app/(app)/(owner)/mensualidades/page.tsx`<br>`src/app/api/invoices/[id]/file/route.ts`<br>`src/app/api/invoices/[id]/route.ts`<br>`src/app/api/invoices/route.ts`<br>`src/modules/invoicing/invoices-tab.tsx`<br>`src/modules/invoicing/server.ts` | `tests/api/online-billing.test.ts` |
+| FAC-06 | `src/app/(app)/(front)/mensualidades/page.tsx`<br>`src/app/api/invoices/[id]/file/route.ts`<br>`src/app/api/invoices/[id]/route.ts`<br>`src/app/api/invoices/route.ts`<br>`src/modules/invoicing/invoices-tab.tsx`<br>`src/modules/invoicing/server.ts` | `tests/api/online-billing.test.ts` |
 

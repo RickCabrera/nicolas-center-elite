@@ -1,7 +1,7 @@
 <!-- DEP-04 · Manual de operación. -->
 # Manual de uso
 
-Para el dueño y los fisioterapeutas de Nicolas Center Elite. La app funciona igual en celular y computadora;
+Para el dueño, los fisioterapeutas y recepción de Nicolas Center Elite. La app funciona igual en celular y computadora;
 en el celular se puede instalar como app desde el navegador ("Agregar a pantalla de inicio").
 
 ## Entrar
@@ -50,6 +50,39 @@ lector cerca de su hora, la cita se marca sola como "Asistió". **Mi horario** d
 **Control de huella**: asistencias de hoy de tu sede, en vivo. "Registro manual" (con motivo) cuando el lector
 falle. Una fila roja "MEMBRESÍA VENCIDA" es un aviso para recepción; no bloquea la entrada.
 
+## Recepción
+
+Para quien atiende el mostrador. Recepción trabaja con **todos** los pacientes de **todas** las sedes en lo
+administrativo, y **no ve información clínica** (perfil clínico, notas de evolución, estudios, recetas, ejercicios
+ni resumen clínico): la NOM-004-SSA3-2012 reserva el expediente clínico al personal de salud. Su menú es Inicio,
+Pacientes, Agenda, Mensualidades, Control de huella y Mi perfil.
+
+- **Inicio**: citas de hoy de todos los fisioterapeutas, mensualidades por vencer y vencidas, y asistencias de hoy.
+  Se puede filtrar por sede.
+- **Pacientes**: buscar por nombre o número de expediente y filtrar por fisioterapeuta. "+ Nuevo paciente" pide la
+  sede, el fisioterapeuta asignado y la membresía; el motivo de consulta y las etiquetas los captura después el
+  fisioterapeuta. "Importar CSV" funciona igual que para el dueño, sin las columnas `motivo` y `etiquetas`.
+- **Ficha del paciente**: datos generales y de contacto ("Editar datos": nombre, teléfono, domicilio, contacto de
+  emergencia, tutor y sede), "Agendar cita", la tarjeta **Completa el alta** (firma del aviso de privacidad, del
+  consentimiento informado y del consentimiento de huella, y registro de la huella en el lector) y dos pestañas:
+  **Membresía** y **Documentos firmados** (los PDF de lo que el paciente firmó). Dar de baja, reactivar y reasignar
+  al fisioterapeuta lo hace el dueño.
+- **Agenda**: las citas de todos los fisioterapeutas. Crear (eligiendo al fisioterapeuta), reprogramar, cancelar con
+  motivo y marcar asistió / no asistió. Al filtrar por un fisioterapeuta, "Horario de …" muestra su horario y sus
+  bloqueos, solo para consulta. La nota de la sesión la escribe el fisioterapeuta.
+- **Mensualidades**: pestañas **Estado de pago** y **Cobros en línea**. Registrar pago (genera el recibo PDF),
+  cobrar en línea con link de tarjeta u OXXO, consultar o cancelar un link, y en la Membresía del paciente asignar
+  o cambiar el plan, pausar y reanudar, y ver el historial con sus recibos. Anular un pago, reembolsar, resolver un
+  pago "en revisión", facturar y la pestaña Ingresos son del dueño.
+- **Control de huella**: asistencias en vivo de todas las sedes y estado del lector. "Registro manual" (con motivo)
+  para cualquier paciente. Registrar o volver a registrar la huella de un paciente se hace desde su ficha. Los
+  reportes de horas del personal y la configuración de lectores son del dueño.
+- **Mi perfil**: sus datos, contraseña, acceso con huella del dispositivo (passkeys), sesiones abiertas y su
+  huella en el lector para registrar entrada y salida.
+
+Si recepción escribe a mano la dirección de una sección que no le corresponde (por ejemplo `/configuracion`,
+`/equipo`, `/recetas` o `/estudios`), la pantalla muestra "Sin acceso" y el servidor rechaza la consulta.
+
 ## Dueño
 
 Todo lo anterior, para todos los pacientes y ambas sedes, más:
@@ -79,6 +112,9 @@ Todo lo anterior, para todos los pacientes y ambas sedes, más:
 - **Equipo**: carga de trabajo por fisioterapeuta. "Agregar fisioterapeuta" envía la invitación (y muestra el
   enlace para copiarlo si el correo no está configurado). "Editar": datos, cédula, si es médico, horario y
   huella. "Desactivar" pide a quién pasan sus pacientes y citas; sus notas y recetas se conservan con su firma.
+  **"Agregar recepción"** invita a quien atiende el mostrador (sin cédula, título profesional ni horario de
+  citas); sus cuentas aparecen en la tarjeta **Recepción**. Desactivarla es inmediato: no tiene pacientes que
+  reasignar, y los pagos y asistencias que registró conservan su nombre.
 - **Control de huella → Reportes**: horas trabajadas del personal por día y semana, y asistencias de pacientes.
 - **Configuración**: datos de la clínica y logo; sedes (el domicilio sale en las recetas); membresías y precios;
   cobros y facturación (estado de Stripe y Facturapi, OXXO, vigencia de links, IVA, código postal de expedición);
@@ -93,6 +129,7 @@ Todo lo anterior, para todos los pacientes y ambas sedes, más:
 | --- | --- |
 | El lector aparece "Sin conexión" | Revisar que la PC de recepción esté encendida y con internet; mientras tanto usar Registro manual. Las lecturas hechas en el lector se recuperan solas al volver. |
 | "Agente puente desconectado" | En la PC de recepción, reiniciar o ver `bridge\logs\agente.log` (ver `bridge/README.md`). |
+| Recepción dice que no puede ver algo del expediente | Es intencional: la información clínica solo la ve el dueño y el fisioterapeuta. Lo administrativo (datos, citas, pagos, huella) sí lo tiene. |
 | Un fisioterapeuta no recibió su invitación | Equipo → su tarjeta → Editar → reenviar invitación, y copiar el enlace. |
 | No aparece "Receta médica" | Solo para médicos con cédula; el dueño lo activa en Equipo → Editar. |
 | Se emitió un documento con un error | Cancelarlo con motivo y emitir uno nuevo (Duplicar). |

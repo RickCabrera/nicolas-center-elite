@@ -2,10 +2,12 @@
 // Genera docs/trazabilidad.md: por cada ID del backlog, los archivos de código y de pruebas que lo citan.
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+// fileURLToPath y rutas con «/»: el resultado es idéntico en Linux, macOS y Windows.
+const root = fileURLToPath(new URL('..', import.meta.url));
 const EPICS = ['INF', 'UI', 'DB', 'AUTH', 'PAC', 'EXP', 'EST', 'AGE', 'REC', 'PAG', 'HUE', 'DASH', 'CFG', 'EQ', 'LEG', 'QA', 'DEP', 'FAC'];
-const COUNTS = { INF: 8, UI: 7, DB: 12, AUTH: 9, PAC: 9, EXP: 10, EST: 6, AGE: 9, REC: 10, PAG: 12, HUE: 16, DASH: 4, CFG: 10, EQ: 7, LEG: 5, QA: 6, DEP: 6, FAC: 6 };
+const COUNTS = { INF: 8, UI: 7, DB: 12, AUTH: 10, PAC: 9, EXP: 10, EST: 6, AGE: 9, REC: 10, PAG: 12, HUE: 16, DASH: 4, CFG: 10, EQ: 7, LEG: 5, QA: 6, DEP: 6, FAC: 6 };
 const walk = (d) => readdirSync(d).flatMap((f) => {
   const p = join(d, f);
   if (['node_modules', '.next', '.git', '.data', 'test-results', 'respaldos'].includes(f)) return [];
@@ -15,7 +17,7 @@ const files = walk(root).filter((f) => /\.(ts|tsx|mjs|sql|ps1|md|yml|json|css)$/
 const hits = {};
 for (const f of files) {
   const text = readFileSync(f, 'utf8');
-  const rel = relative(root, f);
+  const rel = relative(root, f).replaceAll('\\', '/');
   for (const m of text.matchAll(/\b(INF|UI|DB|AUTH|PAC|EXP|EST|AGE|REC|PAG|HUE|DASH|CFG|EQ|LEG|QA|DEP|FAC)-(\d{2})\b/g)) {
     const id = `${m[1]}-${m[2]}`;
     (hits[id] ??= new Set()).add(rel);
