@@ -30,7 +30,7 @@ function useDebounced<T>(value: T, ms = 250): T {
 
 const ageLabel = (n: number) => (n < 1 ? 'Menor de 1 año' : n === 1 ? '1 año' : `${n} años`);
 
-function PatientCard({ p, owner }: { p: PatientListItem; owner: boolean }) {
+function PatientCard({ p, owner, clinical }: { p: PatientListItem; owner: boolean; clinical: boolean }) {
   return (
     <Link href={`/pacientes/${p.id}`} className="card" style={{ padding: 14 }}>
       <div className="stack md">
@@ -42,9 +42,12 @@ function PatientCard({ p, owner }: { p: PatientListItem; owner: boolean }) {
           </div>
           {p.status === 'inactive' ? <Badge>Baja</Badge> : <BillingBadge state={p.billing_state} />}
         </div>
-        <div className="t-sub" style={{ color: 'var(--ink-2)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>
-          {p.reason || 'Sin motivo de consulta registrado'}
-        </div>
+        {/* AUTH-10 · El motivo de consulta es clínico: recepción no lo recibe ni lo ve. */}
+        {clinical && (
+          <div className="t-sub" style={{ color: 'var(--ink-2)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>
+            {p.reason || 'Sin motivo de consulta registrado'}
+          </div>
+        )}
         <div className="hstack wrap" style={{ gap: 6 }}>
           <span className="pill">{p.plan_name ?? 'Sin plan'}</span>
           {owner && <span className="pill gold">FISIO: {shortName(p.therapist_name)}</span>}
@@ -54,7 +57,7 @@ function PatientCard({ p, owner }: { p: PatientListItem; owner: boolean }) {
   );
 }
 
-// PAC-02 · Lista de pacientes: buscador, filtros por edad/etiqueta y (dueño) por fisioterapeuta.
+// PAC-02 · Lista de pacientes: buscador, filtros por edad/etiqueta y (dueño y recepción) por fisioterapeuta.
 export default function Pacientes() {
   const user = useUser();
   const { meta } = useMeta();
@@ -73,7 +76,7 @@ export default function Pacientes() {
     q,
     age: filter === 'ninos' || filter === 'adultos' || filter === 'mayores' ? filter : '',
     tag: filter === 'deportistas' ? 'Deportista' : '',
-    therapist_id: user.isOwner ? therapist : '',
+    therapist_id: user.isFront ? therapist : '',
     status: inactive ? 'inactive' : '',
     limit,
   }));
@@ -83,9 +86,9 @@ export default function Pacientes() {
   const therapists = (meta?.therapists ?? []).filter((t) => t.active);
   const scope = data?.total_scope;
 
-  const title = user.isOwner ? 'Todos los pacientes' : 'Mis pacientes';
-  const sub = user.isOwner
-    ? `${scope === undefined ? '' : `${scope} ${scope === 1 ? 'expediente' : 'expedientes'} · `}vista de dueño`
+  const title = user.isFront ? 'Todos los pacientes' : 'Mis pacientes';
+  const sub = user.isFront
+    ? `${scope === undefined ? '' : `${scope} ${scope === 1 ? 'expediente' : 'expedientes'} · `}${user.isReception ? 'vista de recepción' : 'vista de dueño'}`
     : `Filtrado a tu carga · ${shortName(user.display_name)}`;
   const count = !data ? ' '
     : inactive ? `${data.total} ${data.total === 1 ? 'paciente dado de baja' : 'pacientes dados de baja'}`
@@ -97,16 +100,17 @@ export default function Pacientes() {
 
       <div className="hstack wrap">
         <Input className="round" style={{ flex: 1, minWidth: 200 }} type="search" value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar por nombre o lesión..." aria-label="Buscar pacientes por nombre, lesión, diagnóstico o número de expediente" />
+          placeholder={user.isClinical ? 'Buscar por nombre o lesión...' : 'Buscar por nombre o expediente...'}
+          aria-label={user.isClinical ? 'Buscar pacientes por nombre, lesión, diagnóstico o número de expediente' : 'Buscar pacientes por nombre o número de expediente'} />
         <Button variant="primary" style={{ minHeight: 48, padding: '0 18px' }} onClick={() => setShowNew(true)}>+ Nuevo paciente</Button>
-        {user.isOwner && <Button style={{ minHeight: 48 }} onClick={() => setShowImport(true)}>Importar CSV</Button>}
+        {user.isFront && <Button style={{ minHeight: 48 }} onClick={() => setShowImport(true)}>Importar CSV</Button>}
       </div>
 
       <div className="scroll-x" role="group" aria-label="Filtrar por grupo">
-        {FILTERS.map((f) => <Chip key={f.key} on={filter === f.key} onClick={() => setFilter(f.key)}>{f.label}</Chip>)}
+        {FILTERS.filter((f) => user.isClinical || f.key !== 'deportistas').map((f) => <Chip key={f.key} on={filter === f.key} onClick={() => setFilter(f.key)}>{f.label}</Chip>)}
       </div>
 
-      {user.isOwner && (
+      {user.isFront && (
         <div className="scroll-x" role="group" aria-label="Filtrar por fisioterapeuta">
           <Chip square on={!therapist} onClick={() => setTherapist('')}>Todos los fisios</Chip>
           {therapists.map((t) => (
@@ -131,7 +135,7 @@ export default function Pacientes() {
               {inactive && !q && filter === 'todos' && !therapist ? 'No hay pacientes dados de baja.' : 'Ningún paciente coincide con la búsqueda o los filtros.'}{' '}
               <button type="button" className="btn-link" onClick={clear} style={{ marginLeft: 6 }}>Quitar filtros</button>
             </>
-          ) : user.isOwner
+          ) : user.isFront
             ? 'Aún no hay pacientes registrados. Da de alta al primero con «+ Nuevo paciente» o carga tu lista con «Importar CSV».'
             : 'Aún no tienes pacientes asignados. Registra al primero con «+ Nuevo paciente».'}
         </Empty>
@@ -139,7 +143,7 @@ export default function Pacientes() {
         <>
           {error && <ErrorNote error={error} retry={() => mutate()} />}
           <div className="grid-cards">
-            {data.items.map((p) => <PatientCard key={p.id} p={p} owner={user.isOwner} />)}
+            {data.items.map((p) => <PatientCard key={p.id} p={p} owner={user.isFront} clinical={user.isClinical} />)}
           </div>
           {data.items.length < data.total && (limit < MAX
             ? <Button onClick={() => setLimit((n) => Math.min(n + PAGE, MAX))} loading={isLoading} style={{ alignSelf: 'center' }}>
@@ -151,7 +155,7 @@ export default function Pacientes() {
       )}
 
       <NewPatientSheet open={showNew} onClose={() => setShowNew(false)} />
-      {user.isOwner && <ImportPatientsSheet open={showImport} onClose={() => setShowImport(false)} />}
+      {user.isFront && <ImportPatientsSheet open={showImport} onClose={() => setShowImport(false)} />}
     </div>
   );
 }

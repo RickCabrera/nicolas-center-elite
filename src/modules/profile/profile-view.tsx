@@ -1,7 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { PageHeader } from '@/components/shell';
+import { PageHeader, ROLE_LABEL } from '@/components/shell';
 import { Badge, Button, Card, Checkbox, ErrorNote, Field, Input, KV, Select, Skeleton, useForm, useToast } from '@/components/ui';
 import { useUser } from '@/components/user-context';
 import { api, ApiError, refresh, useApi } from '@/lib/client';
@@ -39,7 +39,8 @@ export function ProfileView() {
       {data && (
         <div className="grid-2" style={{ alignItems: 'start' }}>
           <DataCard key={`d-${data.id}`} profile={data} onSaved={saved} />
-          <LicenseCard key={`l-${data.id}`} profile={data} onSaved={saved} />
+          {/* AUTH-10 · Recepción no emite documentos clínicos: no captura cédula. */}
+          {data.role !== 'reception' && <LicenseCard key={`l-${data.id}`} profile={data} onSaved={saved} />}
           <PasswordCard />
           <PasskeysCard />
           <SessionsCard />
@@ -113,13 +114,15 @@ function DataCard({ profile, onSaved }: { profile: Profile; onSaved: (p: Profile
           <Field label="Teléfono" error={f.errors.phone}>
             <Input {...f.bind('phone')} type="tel" inputMode="tel" placeholder="10 dígitos" autoComplete="tel" />
           </Field>
-          <Field label="Especialidad" error={f.errors.specialty} className="col-span">
-            <Input {...f.bind('specialty')} placeholder="Deportiva, pediátrica, neurológica…" />
-          </Field>
+          {profile.role !== 'reception' && (
+            <Field label="Especialidad" error={f.errors.specialty} className="col-span">
+              <Input {...f.bind('specialty')} placeholder="Deportiva, pediátrica, neurológica…" />
+            </Field>
+          )}
         </div>
         <div className="grid-kv">
           <KV label="Usuario">{profile.username}</KV>
-          <KV label="Rol">{profile.role === 'owner' ? 'Dueño / Director' : 'Fisioterapeuta'}</KV>
+          <KV label="Rol">{ROLE_LABEL[profile.role]}</KV>
           <KV label="Sede">{profile.location_name ?? (profile.role === 'owner' ? 'Todas' : 'Sin asignar')}</KV>
         </div>
         {profile.role !== 'owner' && <div className="t-small">El usuario y la sede los cambia el dueño de la clínica desde Equipo.</div>}

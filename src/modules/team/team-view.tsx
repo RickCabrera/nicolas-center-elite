@@ -8,11 +8,11 @@ import { initials } from '@/lib/format';
 import { DeactivateWizard } from './deactivate-wizard';
 import { ReassignSheet } from './reassign-sheet';
 import { TherapistSheet } from './therapist-sheet';
-import type { Workload, WorkloadRow } from './types';
+import type { StaffRow, Workload, WorkloadRow } from './types';
 import { LoadBar, TeamAvatar } from './ui';
 
 type Open =
-  | { kind: 'new' } | { kind: 'edit'; id: string } | { kind: 'deactivate'; id: string } | { kind: 'reassign'; from?: string } | null;
+  | { kind: 'new'; role?: 'reception' } | { kind: 'edit'; id: string; role?: 'reception' } | { kind: 'deactivate'; id: string } | { kind: 'reassign'; from?: string } | null;
 
 const METRICS = [
   { key: 'appointments_week', label: 'Citas de la semana', unit: 'citas' },
@@ -25,7 +25,10 @@ const tile = { padding: 10 } as const;
 const big = { marginTop: 6, font: '800 20px/1 var(--f-head)' } as const;
 const smallNum = { marginTop: 5, font: '700 15px/1 var(--f-head)' } as const;
 
-/** EQ-01..07 · Pantalla de Equipo: fisioterapeutas, carga de trabajo y administración de cuentas. */
+/**
+ * EQ-01..07 · Pantalla de Equipo: fisioterapeutas, carga de trabajo y administración de cuentas.
+ * AUTH-10 · También el personal de recepción: se invita, edita, desactiva y reactiva aquí (sin carga de trabajo).
+ */
 export function TeamView() {
   const toast = useToast();
   const [weekOf, setWeekOf] = useState<string | null>(null);
@@ -33,6 +36,8 @@ export function TeamView() {
   const [open, setOpen] = useState<Open>(null);
   const [showInactive, setShowInactive] = useState(true);
   const { data, error, mutate } = useApi<Workload>(`/api/users/workload${qs({ week_of: weekOf })}`, { refreshInterval: 60000 });
+  const staff = useApi<StaffRow[]>('/api/users');
+  const reception = (staff.data ?? []).filter((u) => u.role === 'reception');
 
   const items = data?.items ?? [];
   const active = items.filter((t) => t.active);
@@ -43,7 +48,7 @@ export function TeamView() {
   const thisWeek = !!data && data.today >= data.week_from && data.today <= data.week_to;
   const close = () => setOpen(null);
 
-  const reactivate = async (t: WorkloadRow) => {
+  const reactivate = async (t: Pick<WorkloadRow, 'id' | 'display_name'>) => {
     try {
       await api.post(`/api/users/${t.id}/reactivate`);
       await refresh('/api/users', '/api/meta');
@@ -56,13 +61,14 @@ export function TeamView() {
   const actions = (
     <>
       <Button onClick={() => setOpen({ kind: 'reassign' })}>Reasignar pacientes</Button>
+      <Button onClick={() => setOpen({ kind: 'new', role: 'reception' })}>+ Agregar recepción</Button>
       <Button variant="primary" onClick={() => setOpen({ kind: 'new' })}>+ Agregar fisioterapeuta</Button>
     </>
   );
 
   return (
     <div className="page">
-      <PageHeader title="Equipo" sub="Fisioterapeutas y carga de trabajo"
+      <PageHeader title="Equipo" sub="Fisioterapeutas, recepción y carga de trabajo"
         action={<span className="only-desktop"><span className="hstack" style={{ display: 'inline-flex' }}>{actions}</span></span>} />
       <div className="only-mobile" style={{ display: 'block' }}><div className="hstack wrap">{actions}</div></div>
 
@@ -161,8 +167,32 @@ export function TeamView() {
         </button>
       )}
 
+      <Card title="Recepción">
+        <div className="stack sm">
+          <ErrorNote error={staff.error} retry={() => staff.mutate()} />
+          {!staff.data && !staff.error && <Skeleton rows={1} height={56} />}
+          {staff.data && reception.length === 0 && (
+            <Empty>Aún no hay cuentas de recepción. Con «Agregar recepción» invitas a quien atiende el mostrador: opera pacientes, agenda, mensualidades y huella, sin ver información clínica.</Empty>
+          )}
+          {reception.map((u) => (
+            <div key={u.id} className="row" style={{ flexWrap: 'wrap', rowGap: 8, opacity: u.active ? 1 : 0.72 }}>
+              <TeamAvatar text={initials(u.full_name)} dim={!u.active} />
+              <div className="grow" style={{ minWidth: 160 }}>
+                <div className="t-name" style={{ overflowWrap: 'anywhere' }}>{u.display_name}</div>
+                <div className="t-small" style={{ marginTop: 3 }}>Recepción · {u.location_name ?? 'Sin sede'} · {u.username}</div>
+              </div>
+              {!u.active && <Badge>Inactivo</Badge>}
+              <div className="hstack">
+                <Button size="sm" onClick={() => setOpen({ kind: 'edit', id: u.id, role: 'reception' })}>Editar</Button>
+                {!u.active && <Button size="sm" variant="success" onClick={() => reactivate(u)}>Reactivar</Button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       <TherapistSheet open={open?.kind === 'new' || open?.kind === 'edit'} onClose={close}
-        userId={open?.kind === 'edit' ? open.id : null} onDeactivate={(id) => setOpen({ kind: 'deactivate', id })} />
+        userId={open?.kind === 'edit' ? open.id : null} role={(open?.kind === 'new' || open?.kind === 'edit') ? open.role : undefined} onDeactivate={(id) => setOpen({ kind: 'deactivate', id })} />
       <DeactivateWizard open={open?.kind === 'deactivate'} onClose={close} userId={open?.kind === 'deactivate' ? open.id : null} onDone={() => mutate()} />
       <ReassignSheet open={open?.kind === 'reassign'} onClose={close} fromTherapistId={open?.kind === 'reassign' ? open.from : undefined} onDone={() => mutate()} />
     </div>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMeta } from '@/components/meta';
 import { Button, Notice, Sheet, useForm, useToast } from '@/components/ui';
+import { useUser } from '@/components/user-context';
 import { api, ApiError, refresh } from '@/lib/client';
 import { clientErrors, EMPTY_PATIENT, focusFirstInvalid, PatientFormFields, patientPayload, valuesFromPatient, type PatientFormValues } from './patient-form';
 import type { PatientDetail } from './types';
@@ -11,6 +12,7 @@ import type { PatientDetail } from './types';
  * El fisioterapeuta asignado y la membresía no se cambian aquí.
  */
 export function EditPatientSheet({ open, onClose, patient, onSaved }: { open: boolean; onClose: () => void; patient: PatientDetail; onSaved?: (p: PatientDetail) => void }) {
+  const user = useUser();
   const { meta } = useMeta();
   const toast = useToast();
   const f = useForm<PatientFormValues>(EMPTY_PATIENT);
@@ -50,7 +52,7 @@ export function EditPatientSheet({ open, onClose, patient, onSaved }: { open: bo
   return (
     <Sheet open={open} onClose={onClose} title="Editar datos del paciente">
       <form ref={formRef} onSubmit={submit} noValidate>
-        <PatientFormFields f={f} meta={meta} />
+        <PatientFormFields f={f} meta={meta} clinical={user.isClinical} />
         {failure && <div style={{ marginTop: 12 }}><Notice tone="red"><span role="alert">{failure}</span></Notice></div>}
         <div className="sheet-foot">
           <Button size="lg" onClick={onClose}>Cancelar</Button>

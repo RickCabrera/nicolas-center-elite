@@ -102,7 +102,7 @@ export function AgendaScreen() {
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const from = view === 'semana' ? weekStart : fecha;
   const to = view === 'semana' ? addDays(weekStart, 6) : fecha;
-  const tFilter = user.isOwner ? therapist : '';
+  const tFilter = user.isFront ? therapist : '';
 
   const counts = useApi<{ date: string; count: number }[]>(
     '/api/appointments/days' + qs({ from: stripStart, to: addDays(stripStart, STRIP_DAYS - 1), therapist_id: tFilter }), { refreshInterval: 30000 });
@@ -122,26 +122,26 @@ export function AgendaScreen() {
   const current = selected ? (appts.data?.find((a) => a.id === selected.id) ?? selected) : null;
 
   const therapists = (meta?.therapists ?? []).filter((t) => t.active);
-  const hoursUser = user.isOwner ? therapists.find((t) => t.id === therapist) : null;
+  const hoursUser = user.isFront ? therapists.find((t) => t.id === therapist) : null;
   const loading = appts.isLoading && !appts.data;
   const dayList = byDay.get(fecha) ?? [];
 
   const blockRows = (d: string) => blocksOf(d).map((b) => (
     <div key={b.id + d} className="notice gold" style={{ padding: '10px 12px' }}>
       <span className="t-label" style={{ color: 'var(--gold)' }}>Bloqueo</span>
-      <span style={{ marginLeft: 8 }}>{user.isOwner && b.user_name ? `${b.user_name} · ` : ''}{blockRange(b)}{b.reason ? ` · ${b.reason}` : ''}</span>
+      <span style={{ marginLeft: 8 }}>{user.isFront && b.user_name ? `${b.user_name} · ` : ''}{blockRange(b)}{b.reason ? ` · ${b.reason}` : ''}</span>
     </div>
   ));
 
   return (
     <div className="page">
       <style>{CSS}</style>
-      <PageHeader title={user.isOwner ? 'Agenda de la clínica' : 'Mi agenda'} sub={user.isOwner ? 'Todos los fisioterapeutas' : 'Solo tus citas'} />
+      <PageHeader title={user.isFront ? 'Agenda de la clínica' : 'Mi agenda'} sub={user.isFront ? 'Todos los fisioterapeutas' : 'Solo tus citas'} />
 
       <div className="hstack wrap between">
         <div className="hstack wrap">
           <Button variant="primary" size="lg" style={{ minWidth: 180 }} onClick={() => setNewOpen(true)}>+ Nueva cita</Button>
-          {!user.isOwner && <Button size="lg" onClick={() => setHoursOpen(true)}>Mi horario</Button>}
+          {!user.isFront && <Button size="lg" onClick={() => setHoursOpen(true)}>Mi horario</Button>}
           {hoursUser && <Button size="lg" onClick={() => setHoursOpen(true)}>Horario de {shortName(hoursUser.full_name)}</Button>}
         </div>
         <Tabs<View> tabs={[{ key: 'dia', label: 'Día' }, { key: 'semana', label: 'Semana' }]} value={view} onChange={(v) => go({ vista: v })} />
@@ -168,7 +168,7 @@ export function AgendaScreen() {
         })}
       </div>
 
-      {user.isOwner && therapists.length > 0 && (
+      {user.isFront && therapists.length > 0 && (
         <div className="scroll-x" role="group" aria-label="Filtrar por fisioterapeuta">
           <Chip square on={!therapist} onClick={() => setTherapist('')}>Todos</Chip>
           {therapists.map((t) => <Chip key={t.id} square on={therapist === t.id} onClick={() => setTherapist(therapist === t.id ? '' : t.id)}>{shortName(t.full_name)}</Chip>)}
@@ -208,7 +208,7 @@ export function AgendaScreen() {
                     </button>
                     {blocksOf(d).map((b) => (
                       <div key={b.id} className="ag-none" style={{ borderColor: 'rgba(216,180,92,.5)', color: 'var(--gold)' }} title={`${blockRange(b)}${b.reason ? ' · ' + b.reason : ''}`}>
-                        Bloqueo{user.isOwner && b.user_name ? ` · ${shortName(b.user_name)}` : ''}{b.reason ? ` · ${b.reason}` : ''}
+                        Bloqueo{user.isFront && b.user_name ? ` · ${shortName(b.user_name)}` : ''}{b.reason ? ` · ${b.reason}` : ''}
                       </div>
                     ))}
                     {list.length === 0 ? <div className="ag-none">Sin citas</div> : list.map((a) => (
@@ -221,7 +221,7 @@ export function AgendaScreen() {
                         <div className="ag-name ellipsis" style={{ marginTop: 5, font: '700 13px/1.2 var(--f-head)' }}>{a.patient_name}</div>
                         <div className="ellipsis" style={{ marginTop: 3, font: '400 11.5px/1.25 var(--f-body)', color: 'var(--ink-3)' }}>{a.type_name}</div>
                         <div className="ellipsis" style={{ marginTop: 4, font: '600 9px/1.2 var(--f-mono)', letterSpacing: '.08em', textTransform: 'uppercase', color: a.status === 'attended' ? 'var(--green)' : a.status === 'no_show' ? 'var(--red)' : 'var(--gold)' }}>
-                          {a.status === 'scheduled' ? (user.isOwner ? a.therapist_short : a.location_name) : APPT_STATUS_LABEL[a.status]}
+                          {a.status === 'scheduled' ? (user.isFront ? a.therapist_short : a.location_name) : APPT_STATUS_LABEL[a.status]}
                         </div>
                       </button>
                     ))}
@@ -251,8 +251,8 @@ export function AgendaScreen() {
 
       <NewAppointmentSheet open={newOpen} onClose={() => setNewOpen(false)} date={fecha} onSavedDate={(d) => go({ fecha: d })} />
       <AppointmentSheet appointment={current} onClose={() => setSelected(null)} onMoved={(d) => { if (view === 'dia') go({ fecha: d }); }} />
-      <Sheet open={hoursOpen} onClose={() => setHoursOpen(false)} title={user.isOwner && hoursUser ? `Horario de ${hoursUser.display_name}` : 'Mi horario'} wide>
-        <HoursEditor userId={user.isOwner && hoursUser ? hoursUser.id : user.id} />
+      <Sheet open={hoursOpen} onClose={() => setHoursOpen(false)} title={user.isFront && hoursUser ? `Horario de ${hoursUser.display_name}` : 'Mi horario'} wide>
+        <HoursEditor userId={user.isFront && hoursUser ? hoursUser.id : user.id} readOnly={user.isReception} />
       </Sheet>
     </div>
   );

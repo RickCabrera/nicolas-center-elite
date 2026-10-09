@@ -84,7 +84,7 @@ const VALUE_LABEL: Record<string, Record<string, string>> = {
   sex: { F: 'Femenino', M: 'Masculino', X: 'Otro' },
   method: PAYMENT_METHOD_LABEL,
   plan_kind: PLAN_KIND_LABEL,
-  role: { owner: 'Dueño', therapist: 'Fisioterapeuta' },
+  role: { owner: 'Dueño', therapist: 'Fisioterapeuta', reception: 'Recepción' },
   direction: { in: 'Entrada', out: 'Salida' },
 };
 

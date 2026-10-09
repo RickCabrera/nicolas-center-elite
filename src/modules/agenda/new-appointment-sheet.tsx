@@ -89,13 +89,13 @@ export function NewAppointmentSheet({ open, onClose, patientId, date, onSaved, o
     setF((s) => {
       let n = s;
       if (!s.type_name && types[0]) n = { ...n, type_name: types[0].name, duration_min: types[0].duration };
-      if (user.isOwner && !s.therapist_id && s.patient_id) {
+      if (user.isFront && !s.therapist_id && s.patient_id) {
         const p = patients?.find((x) => x.id === s.patient_id);
         if (p && therapists.some((t) => t.id === p.therapist_id)) n = { ...n, therapist_id: p.therapist_id };
       }
       return n;
     });
-  }, [open, editing, types, patients, therapists, user.isOwner, f.patient_id]);
+  }, [open, editing, types, patients, therapists, user.isFront, f.patient_id]);
 
   const pickPatient = (id: string) => {
     const p = patients?.find((x) => x.id === id);
@@ -133,7 +133,7 @@ export function NewAppointmentSheet({ open, onClose, patientId, date, onSaved, o
 
     setBusy(true);
     try {
-      const common = { date: f.date, time: f.time, duration_min: f.duration_min, type_name: f.type_name, notes: f.notes, ...(user.isOwner && f.therapist_id ? { therapist_id: f.therapist_id } : {}) };
+      const common = { date: f.date, time: f.time, duration_min: f.duration_min, type_name: f.type_name, notes: f.notes, ...(user.isFront && f.therapist_id ? { therapist_id: f.therapist_id } : {}) };
       if (editing) {
         await api.patch<Appointment>(`/api/appointments/${appointment!.id}`, common);
         toast(`Cita actualizada · ${dayLabel(f.date)} ${f.time}`);
@@ -198,7 +198,7 @@ export function NewAppointmentSheet({ open, onClose, patientId, date, onSaved, o
               ? <Input value={fixedPatient} disabled readOnly />
               : <PatientPicker value={f.patient_id} onChange={pickPatient} invalid={!!errors.patient_id} />}
           </Field>
-          {user.isOwner && (
+          {user.isFront && (
             <Field label="Fisioterapeuta" error={errors.therapist_id}>
               <Select value={f.therapist_id} onChange={(e) => set('therapist_id', e.target.value)} invalid={!!errors.therapist_id}>
                 <option value="">{meta ? 'El asignado al paciente' : 'Cargando…'}</option>

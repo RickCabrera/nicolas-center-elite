@@ -36,8 +36,62 @@ export function blockRange(b: Pick<TimeBlock, 'starts_at' | 'ends_at'>): string 
 /**
  * AGE-07 · Horario laboral y bloqueos de un usuario. Autocontenido: lo incrustan Agenda, Equipo y Mi perfil.
  * El permiso real lo aplica la API (el dueño edita a cualquiera; el fisioterapeuta solo el suyo).
+ * `readOnly` (recepción, AUTH-10): solo consulta el horario y los bloqueos para saber cuándo agendar.
  */
-export function HoursEditor({ userId }: { userId: string }) {
+export function HoursEditor({ userId, readOnly = false }: { userId: string; readOnly?: boolean }) {
+  return readOnly ? <HoursReadOnly userId={userId} /> : <HoursForm userId={userId} />;
+}
+
+function HoursReadOnly({ userId }: { userId: string }) {
+  const hours = useApi<HourRow[]>(`/api/schedule/hours?user_id=${userId}`);
+  const blocks = useApi<TimeBlock[]>(`/api/schedule/blocks?user_id=${userId}`);
+  const days = hours.data ? toDays(hours.data) : null;
+  return (
+    <div className="stack lg">
+      <section className="stack md" aria-label="Horario laboral">
+        <div className="t-h3 blue">Horario laboral</div>
+        {hours.error && !days ? <ErrorNote error={hours.error} retry={() => hours.mutate()} />
+          : !days ? <Skeleton rows={4} height={48} />
+          : ORDER.every((wd) => !days[wd].on) ? <Empty>Sin horario definido: la agenda acepta citas a cualquier hora.</Empty>
+          : (
+            <div className="stack sm">
+              {ORDER.map((wd) => {
+                const d = days[wd];
+                return (
+                  <div key={wd} className="row">
+                    <div className="t-strong" style={{ flex: '0 0 110px' }}>{weekdayLong(wd)}</div>
+                    <div className="grow" style={{ fontFamily: 'var(--f-mono)', fontSize: 12.5, color: d.on ? undefined : 'var(--ink-4)' }}>
+                      {d.on ? `${d.s1} – ${d.e1}${d.two ? ` · ${d.s2} – ${d.e2}` : ''}` : 'No atiende'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+      </section>
+      <section className="stack md" aria-label="Bloqueos">
+        <div className="t-h3 blue">Bloqueos</div>
+        {blocks.error && !blocks.data ? <ErrorNote error={blocks.error} retry={() => blocks.mutate()} />
+          : !blocks.data ? <Skeleton rows={1} height={48} />
+          : blocks.data.length === 0 ? <Empty>Sin bloqueos próximos.</Empty>
+          : (
+            <div className="stack sm">
+              {blocks.data.map((b) => (
+                <div key={b.id} className="row">
+                  <div className="grow">
+                    <div className="t-strong" style={{ fontFamily: 'var(--f-mono)', fontSize: 12.5, lineHeight: 1.4 }}>{blockRange(b)}</div>
+                    <div className="t-small" style={{ marginTop: 3, overflowWrap: 'anywhere' }}>{b.reason || 'Sin motivo'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+      </section>
+    </div>
+  );
+}
+
+function HoursForm({ userId }: { userId: string }) {
   const toast = useToast();
   const hours = useApi<HourRow[]>(`/api/schedule/hours?user_id=${userId}`);
   const blocks = useApi<TimeBlock[]>(`/api/schedule/blocks?user_id=${userId}`);

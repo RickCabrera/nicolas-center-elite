@@ -38,24 +38,28 @@ function suggestUsername(name: string): string {
 
 const refreshTeam = () => refresh('/api/users', '/api/meta');
 
-type Props = { open: boolean; onClose: () => void; userId?: string | null; onDeactivate?: (id: string) => void };
+type StaffRole = 'therapist' | 'reception';
+type Props = { open: boolean; onClose: () => void; userId?: string | null; role?: StaffRole; onDeactivate?: (id: string) => void };
 
-/** EQ-02 / EQ-03 / EQ-06 · Hoja de alta y edición de fisioterapeuta. */
-export function TherapistSheet({ open, onClose, userId, onDeactivate }: Props) {
+/**
+ * EQ-02 / EQ-03 / EQ-06 · Hoja de alta y edición de fisioterapeuta.
+ * AUTH-10 · Con `role: 'reception'` da de alta o edita a una persona de recepción: sin cédula, especialidad ni horario de citas.
+ */
+export function TherapistSheet({ open, onClose, userId, role = 'therapist', onDeactivate }: Props) {
+  const who = role === 'reception' ? 'recepción' : 'fisioterapeuta';
   return (
-    <Sheet open={open} onClose={onClose} title={userId ? 'Editar fisioterapeuta' : 'Agregar fisioterapeuta'} wide>
-      {open && (userId ? <EditBody userId={userId} onClose={onClose} onDeactivate={onDeactivate} /> : <CreateBody onClose={onClose} />)}
+    <Sheet open={open} onClose={onClose} title={userId ? `Editar ${who}` : `Agregar ${who}`} wide>
+      {open && (userId ? <EditBody userId={userId} onClose={onClose} onDeactivate={onDeactivate} /> : <CreateBody onClose={onClose} role={role} />)}
     </Sheet>
   );
 }
 
 /** Campos comunes del alta y la edición: Datos + Cédula y facultades. */
-function Fields({ f, isNew, onName, onUsername }: { f: ReturnType<typeof useForm<Form>>; isNew: boolean; onName?: (v: string) => void; onUsername?: () => void }) {
+function Fields({ f, isNew, reception = false, onName, onUsername }: { f: ReturnType<typeof useForm<Form>>; isNew: boolean; reception?: boolean; onName?: (v: string) => void; onUsername?: () => void }) {
   const { meta } = useMeta();
   const v = f.values;
   const e = f.errors;
   const locations = (meta?.locations ?? []).filter((l) => l.active || l.id === v.location_id);
-  const noLicense = v.license_number.trim() === '';
   return (
     <>
       <SectionTitle>Datos</SectionTitle>
@@ -74,9 +78,11 @@ function Fields({ f, isNew, onName, onUsername }: { f: ReturnType<typeof useForm
         <Field label="Correo" error={e.email} hint={isNew ? 'Ahí recibe la invitación para definir su contraseña.' : undefined}>
           <Input {...f.bind('email')} type="email" inputMode="email" placeholder="nombre@correo.com" autoCapitalize="none" autoComplete="off" />
         </Field>
-        <Field label="Especialidad" error={e.specialty}>
-          <Input {...f.bind('specialty')} placeholder="Deportiva, pediátrica, neurológica…" />
-        </Field>
+        {!reception && (
+          <Field label="Especialidad" error={e.specialty}>
+            <Input {...f.bind('specialty')} placeholder="Deportiva, pediátrica, neurológica…" />
+          </Field>
+        )}
         <Field label="Sede" error={e.location_id}>
           <Select {...f.bind('location_id')}>
             <option value="">{meta ? 'Selecciona la sede' : 'Cargando…'}</option>
@@ -87,7 +93,20 @@ function Fields({ f, isNew, onName, onUsername }: { f: ReturnType<typeof useForm
           <Input {...f.bind('phone')} type="tel" inputMode="tel" placeholder="10 dígitos" />
         </Field>
       </div>
+      {reception && (
+        <Notice>Recepción atiende el mostrador: pacientes, agenda, mensualidades y huella de todas las sedes. No ve información clínica, por eso no lleva cédula ni horario de citas.</Notice>
+      )}
+      {!reception && <ClinicalFields f={f} isNew={isNew} />}
+    </>
+  );
+}
 
+function ClinicalFields({ f, isNew }: { f: ReturnType<typeof useForm<Form>>; isNew: boolean }) {
+  const v = f.values;
+  const e = f.errors;
+  const noLicense = v.license_number.trim() === '';
+  return (
+    <>
       <SectionTitle>Cédula y facultades</SectionTitle>
       <div className="grid-form">
         <Field label="Cédula profesional" error={e.license_number} hint="Aparece en las indicaciones y recetas que emite.">
@@ -127,9 +146,10 @@ function localErrors(v: Form): Record<string, string> {
   return e;
 }
 
-function CreateBody({ onClose }: { onClose: () => void }) {
+function CreateBody({ onClose, role }: { onClose: () => void; role: StaffRole }) {
   const toast = useToast();
-  const f = useForm<Form>(EMPTY);
+  const reception = role === 'reception';
+  const f = useForm<Form>(reception ? { ...EMPTY, title: '' } : EMPTY);
   const [touchedUser, setTouchedUser] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -141,10 +161,10 @@ function CreateBody({ onClose }: { onClose: () => void }) {
     if (Object.keys(le).length) { f.setErrors(le); setError(null); return; }
     setBusy(true); setError(null);
     try {
-      const r = await api.post<InviteResult & { user: TeamUserDetail }>('/api/users', payload(f.values));
+      const r = await api.post<InviteResult & { user: TeamUserDetail }>('/api/users', { ...payload(f.values), role });
       setDone(r);
       await refreshTeam();
-      toast('Fisioterapeuta agregado');
+      toast(reception ? 'Recepción agregada' : 'Fisioterapeuta agregado');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(0, 'error', 'No se pudo guardar. Intenta de nuevo.');
       if (err.fields) f.setErrors(err.fields);
@@ -157,7 +177,7 @@ function CreateBody({ onClose }: { onClose: () => void }) {
   if (done) {
     return (
       <div className="stack">
-        <div className="t-body"><b>{done.user.display_name}</b> ya aparece en el equipo y en los selectores de fisioterapeuta. Podrá entrar en cuanto defina su contraseña.</div>
+        <div className="t-body"><b>{done.user.display_name}</b> ya aparece en el equipo{reception ? ' como recepción' : ' y en los selectores de fisioterapeuta'}. Podrá entrar en cuanto defina su contraseña.</div>
         <InviteLinkBox result={done} email={done.user.email} />
         <div className="sheet-foot"><Button variant="primary" onClick={onClose}>Listo</Button></div>
       </div>
@@ -166,7 +186,7 @@ function CreateBody({ onClose }: { onClose: () => void }) {
   return (
     <form className="stack" onSubmit={submit} noValidate>
       {/* El usuario se sugiere a partir del nombre hasta que alguien lo escribe a mano. */}
-      <Fields f={f} isNew onUsername={() => setTouchedUser(true)}
+      <Fields f={f} isNew reception={reception} onUsername={() => setTouchedUser(true)}
         onName={(name) => { if (!touchedUser) f.set('username', suggestUsername(name)); }} />
       <Notice>No se captura contraseña: al guardar se crea un enlace de invitación para que la persona defina la suya.</Notice>
       {error && !error.fields && <ErrorNote error={error} />}
@@ -196,6 +216,22 @@ function EditForm({ user, onClose, onDeactivate, reload }: { user: TeamUserDetai
   const [askReset, setAskReset] = useState(false);
   const [reactivating, setReactivating] = useState(false);
   const isTherapist = user.role === 'therapist';
+  const isReception = user.role === 'reception';
+  const [askOff, setAskOff] = useState(false);
+
+  // AUTH-10 · Recepción no tiene pacientes ni citas: su baja es directa, sin asistente de reasignación.
+  const deactivateReception = async () => {
+    try {
+      await api.post(`/api/users/${user.id}/deactivate`, {});
+      await refreshTeam();
+      reload();
+      toast(`${user.display_name} ya no tiene acceso`);
+      setAskOff(false);
+      onClose();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'No se pudo desactivar la cuenta.', 'error');
+    }
+  };
 
   const save = async (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -253,7 +289,7 @@ function EditForm({ user, onClose, onDeactivate, reload }: { user: TeamUserDetai
       )}
 
       <form className="stack" onSubmit={save} noValidate>
-        <Fields f={f} isNew={false} />
+        <Fields f={f} isNew={false} reception={isReception} />
         {error && !error.fields && <ErrorNote error={error} />}
         {error?.fields && <div className="notice red" role="alert">{error.message}</div>}
         <div className="hstack" style={{ justifyContent: 'flex-end' }}>
@@ -316,6 +352,25 @@ function EditForm({ user, onClose, onDeactivate, reload }: { user: TeamUserDetai
         </>
       )}
 
+      {isReception && user.active && (
+        <>
+          <hr className="divider" />
+          <div className="stack md">
+            <SectionTitle tone="red">Zona de riesgo</SectionTitle>
+            <div className="row" style={{ flexWrap: 'wrap', borderColor: 'rgba(255,107,107,.35)' }}>
+              <div className="grow" style={{ minWidth: 200 }}>
+                <div className="t-strong">Desactivar cuenta</div>
+                <div className="t-small">Pierde el acceso de inmediato. No tiene pacientes que reasignar; los pagos y asistencias que registró se conservan con su nombre.</div>
+              </div>
+              <Button variant="danger" size="sm" onClick={() => setAskOff(true)}>Desactivar</Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <Confirm open={askOff} onClose={() => setAskOff(false)} danger title="Desactivar cuenta de recepción" confirmLabel="Desactivar"
+        message={<><b>{user.display_name}</b> dejará de poder iniciar sesión y se cerrarán sus sesiones abiertas. Puedes reactivar la cuenta después.</>}
+        onConfirm={deactivateReception} />
       <Confirm open={askReset} onClose={() => setAskReset(false)} title="Restablecer contraseña" confirmLabel="Generar enlace"
         message={<>Se enviará a <b>{user.email}</b> un enlace para definir una contraseña nueva (vigente 2 horas). Su contraseña actual sigue funcionando hasta que lo use.</>}
         onConfirm={async () => { setAskReset(false); await sendLink(true); }} />

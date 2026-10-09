@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Checkbox, Notice, Sheet, useToast } from '@/components/ui';
+import { useUser } from '@/components/user-context';
 import { api, ApiError, refresh } from '@/lib/client';
 import { IMPORT_COLUMNS, toCsv } from './csv';
 import type { ImportPreview } from './types';
@@ -36,6 +37,7 @@ function downloadTemplate() {
 
 /** PAC-09 · Hoja "Importar pacientes" (solo dueño): archivo → vista previa con errores por fila → importar. */
 export function ImportPatientsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const user = useUser();
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState('');
@@ -106,6 +108,9 @@ export function ImportPatientsSheet({ open, onClose }: { open: boolean; onClose:
             Columnas: {IMPORT_COLUMNS.join(', ')}. Obligatorias: nombre, fecha_nacimiento (DD/MM/AAAA), sede y fisioterapeuta
             (su usuario o su nombre). En menores de edad también los datos del tutor. Las etiquetas se separan con «|». Máximo 2,000 filas.
           </div>
+        )}
+        {user.isReception && (
+          <Notice>Desde recepción no se importan el motivo de consulta ni las etiquetas: los captura el fisioterapeuta en el expediente.</Notice>
         )}
         {error && <Notice tone="red"><span role="alert">{error}</span></Notice>}
 
