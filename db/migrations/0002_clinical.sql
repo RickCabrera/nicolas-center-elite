@@ -1,3 +1,26 @@
+-- Postgres 17: norm() debe llamar a public.f_unaccent con esquema antes de usarse en columnas generadas
+-- e índices (bases donde 0001 se aplicó con la versión anterior de norm).
+do $$
+declare sch text;
+begin
+  select n.nspname into sch from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'unaccent';
+  execute format(
+    'create or replace function public.f_unaccent(text) returns text language sql immutable parallel safe security definer as %L',
+    format('select %I.unaccent(%L::regdictionary, $1)', sch, sch || '.unaccent'));
+end $$;
+create or replace function public.norm(text) returns text
+language sql immutable parallel safe as $$ select lower(public.f_unaccent(coalesce($1, ''))) $$;
+
+-- El rol de la app necesita usar el esquema donde viven las extensiones (en Supabase, "extensions").
+do $$
+declare sch text;
+begin
+  for sch in select distinct n.nspname from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+             where e.extname in ('unaccent','btree_gist','pgcrypto') and n.nspname not in ('public','pg_catalog') loop
+    execute format('grant usage on schema %I to nce_app', sch);
+  end loop;
+end $$;
+
 -- 0002 · Núcleo clínico: pacientes, expediente, estudios y catálogos
 create sequence patient_record_seq start 1;
 

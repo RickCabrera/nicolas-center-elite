@@ -33,18 +33,31 @@ end $$;
 
 -- ---------- utilidades ----------
 -- unaccent puede vivir en otro esquema (en Supabase, "extensions"): se liga por nombre completo.
+-- security definer: el rol de la app la usa sin necesitar permisos sobre el esquema de extensiones.
 do $$
 declare sch text;
 begin
   select n.nspname into sch from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'unaccent';
   execute format(
-    'create or replace function public.f_unaccent(text) returns text language sql immutable parallel safe as %L',
+    'create or replace function public.f_unaccent(text) returns text language sql immutable parallel safe security definer as %L',
     format('select %I.unaccent(%L::regdictionary, $1)', sch, sch || '.unaccent'));
 end $$;
 
+-- El rol de la app necesita usar el esquema donde viven las extensiones (en Supabase, "extensions").
+do $$
+declare sch text;
+begin
+  for sch in select distinct n.nspname from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+             where e.extname in ('unaccent','btree_gist','pgcrypto') and n.nspname not in ('public','pg_catalog') loop
+    execute format('grant usage on schema %I to nce_app', sch);
+  end loop;
+end $$;
+
 -- Texto normalizado para búsquedas: sin acentos y en minúsculas.
-create or replace function norm(text) returns text
-language sql immutable parallel safe as $$ select lower(f_unaccent(coalesce($1, ''))) $$;
+-- Nombre completo de f_unaccent: Postgres 17 (Supabase) evalúa columnas generadas e índices con un
+-- search_path restringido, y sin esquema la función no se encuentra.
+create or replace function public.norm(text) returns text
+language sql immutable parallel safe as $$ select lower(public.f_unaccent(coalesce($1, ''))) $$;
 
 -- Fecha local de la clínica (America/Mexico_City) de un instante.
 create or replace function mx_date(timestamptz) returns date
