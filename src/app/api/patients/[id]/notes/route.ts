@@ -10,7 +10,7 @@ type NoteRow = {
 };
 
 // EXP-04 · Notas de evolución, la más reciente primero; cada nota lleva sus adendas en `addenda` (en orden cronológico).
-export const GET = route({ auth: 'user' }, async ({ db, params }) => {
+export const GET = route({ auth: 'clinical' }, async ({ db, params }) => {
   const patient = await requirePatient(db, params.id);
   const rows = await db<NoteRow[]>`
     select id, patient_id, appointment_id, addendum_of, body, pain_level, range_of_motion, noted_at,
@@ -38,7 +38,7 @@ const Body = z.object({
 // EXP-04 · Crea una nota firmada. El autor, la cédula, la hora y la firma los fija la base (trigger
 // evolution_notes_sign) con el usuario de la sesión: lo que mande el cliente en esos campos se ignora.
 // No hay PATCH ni DELETE: una nota firmada solo se corrige con una adenda.
-export const POST = route({ auth: 'user', body: Body }, async ({ db, user, params, body, system }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, user, params, body, system }) => {
   const patient = await requirePatient(db, params.id);
 
   let addendumOf: string | null = null;

@@ -15,7 +15,11 @@ export const GET = route({ auth: 'owner' }, async ({ db, query }) => {
 });
 
 // EQ-02 / AUTH-03 · Alta de fisioterapeuta SIN contraseña: recibe un enlace de invitación para definirla.
-export const POST = route({ auth: 'owner', body: NewUser }, async ({ body, system }) => {
+// AUTH-10 · También da de alta a recepción: sin cédula, sin especialidad y sin facultad de recetar.
+export const POST = route({ auth: 'owner', body: NewUser }, async ({ body: sent, system }) => {
+  const body = sent.role === 'reception'
+    ? { ...sent, specialty: '', license_number: null, license_institution: null, specialty_license: null, is_physician: false }
+    : sent;
   if (body.is_physician && !body.license_number) {
     throw badRequest(PHYSICIAN_NEEDS_LICENSE, { license_number: 'Escribe la cédula profesional para marcarlo como médico.' });
   }
@@ -25,7 +29,7 @@ export const POST = route({ auth: 'owner', body: NewUser }, async ({ body, syste
     const [row] = await tx<{ id: string }[]>`
       insert into users (username, email, role, full_name, title, specialty, location_id, phone,
                          license_number, license_institution, specialty_license, is_physician)
-      values (${body.username}, ${body.email}, 'therapist', ${body.full_name}, ${body.title}, ${body.specialty},
+      values (${body.username}, ${body.email}, ${body.role}, ${body.full_name}, ${body.title}, ${body.specialty},
               ${body.location_id}, ${body.phone}, ${body.license_number}, ${body.license_institution},
               ${body.specialty_license}, ${body.is_physician})
       returning id`;

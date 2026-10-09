@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { route } from '@/lib/api';
 import { LocationCode, LocationFields } from '@/modules/settings/location-schema';
 
-// CFG-02 · Sedes. Todos las leen (selectores); el dueño ve además cuántos pacientes, usuarios y documentos dependen de cada una.
+// CFG-02 · Sedes. Todos las leen (selectores, también recepción); el dueño ve además cuántos pacientes, usuarios y documentos dependen de cada una.
 export const GET = route({ auth: 'user' }, async ({ db, user }) => {
   if (user.role !== 'owner') {
     return db`select id, code, name, street, neighborhood, city, state, zip, phone, hours, active from locations order by active desc, name`;

@@ -88,9 +88,10 @@ type Form = ReturnType<typeof useForm<PatientFormValues>>;
 
 /**
  * Campos del paciente compartidos por "Nuevo paciente" y "Editar datos" (PAC-03, PAC-05).
- * `assign` agrega fisioterapeuta (solo dueño) y membresía, que solo se eligen en el alta.
+ * `assign` agrega fisioterapeuta (dueño y recepción) y membresía, que solo se eligen en el alta.
+ * `clinical: false` (recepción, AUTH-10) quita etiquetas y motivo de consulta: son del fisioterapeuta y la API los ignora.
  */
-export function PatientFormFields({ f, meta, assign }: { f: Form; meta: Meta | undefined; assign?: { therapist: boolean } }) {
+export function PatientFormFields({ f, meta, assign, clinical = true }: { f: Form; meta: Meta | undefined; assign?: { therapist: boolean }; clinical?: boolean }) {
   const { values: v, errors: e, bind, set } = f;
   const age = ageOf(v.birth_date);
   const minor = age !== null && age < 18;
@@ -183,7 +184,7 @@ export function PatientFormFields({ f, meta, assign }: { f: Form; meta: Meta | u
         </Field>
       )}
 
-      {tags.length > 0 && (
+      {clinical && tags.length > 0 && (
         <div className="field col-span" role="group" aria-label="Etiquetas">
           <span>Etiquetas (opcional)</span>
           <div className="hstack wrap">
@@ -193,9 +194,11 @@ export function PatientFormFields({ f, meta, assign }: { f: Form; meta: Meta | u
         </div>
       )}
 
-      <Field label="Motivo de consulta / lesión" error={e.reason} className="col-span">
-        <Textarea {...bind('reason')} rows={3} placeholder="Ej. Esguince de tobillo grado II, dolor al apoyar" maxLength={600} />
-      </Field>
+      {clinical && (
+        <Field label="Motivo de consulta / lesión" error={e.reason} className="col-span">
+          <Textarea {...bind('reason')} rows={3} placeholder="Ej. Esguince de tobillo grado II, dolor al apoyar" maxLength={600} />
+        </Field>
+      )}
     </div>
   );
 }

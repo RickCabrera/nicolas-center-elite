@@ -12,6 +12,7 @@ import { PlanPickerSheet } from './plan-picker-sheet';
 import type { MembershipDetail, Payment } from './types';
 
 // PAG-02 · Membresía dentro del expediente. Dueño: pagos y acciones. Fisioterapeuta: solo plan y estado.
+// AUTH-10 · Recepción: cobra, cambia el plan, pausa y ve el historial y los recibos; anular y facturar son del dueño.
 export function MembershipPanel({ patientId }: { patientId: string }) {
   const user = useUser();
   const toast = useToast();
@@ -29,6 +30,7 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
   const m = data.membership;
   const name = data.patient.full_name;
   const owner = user.isOwner;
+  const front = user.isFront;
 
   const act = async (action: 'pause' | 'resume') => {
     try {
@@ -58,8 +60,8 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
       <Card title="Membresía" blue action={<BillingBadge state={data.state} />}>
         {!m ? (
           <div className="stack md">
-            <Empty>Sin membresía. {owner ? 'Asigna un plan para llevar el control de sus pagos.' : 'El dueño de la clínica asigna el plan.'}</Empty>
-            {owner && <Button variant="primary" style={{ alignSelf: 'flex-start' }} onClick={() => setPicker('assign')}>Asignar plan</Button>}
+            <Empty>Sin membresía. {front ? 'Asigna un plan para llevar el control de sus pagos.' : 'El dueño de la clínica asigna el plan.'}</Empty>
+            {front && <Button variant="primary" style={{ alignSelf: 'flex-start' }} onClick={() => setPicker('assign')}>Asignar plan</Button>}
           </div>
         ) : (
           <div className="stack md">
@@ -74,7 +76,7 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
             {m.membership_status === 'paused' && (
               <Notice tone="gold">En pausa desde el {fmtDate(m.paused_on)}. Al reanudar, el vencimiento se recorre los días que duró la pausa.</Notice>
             )}
-            {owner && (
+            {front && (
               <div className="hstack wrap">
                 {m.membership_status === 'paused'
                   ? <Button variant="primary" onClick={() => setConfirm('resume')}>Reanudar</Button>
@@ -90,7 +92,7 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
         )}
       </Card>
 
-      {owner && (
+      {front && (
         <Card title="Historial de pagos">
           {!data.payments?.length ? <Empty>Aún no hay pagos registrados para este paciente.</Empty> : (
             <div className="stack sm">
@@ -106,7 +108,7 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
                         {PAYMENT_METHOD_LABEL[p.method]}{p.reference ? ` · Ref. ${p.reference}` : ''} · Registró {p.recorded_by_name || '—'}
                       </div>
                       {p.note && <div className="t-small" style={{ marginTop: 3, overflowWrap: 'anywhere' }}>Nota: {p.note}</div>}
-                      {p.invoice_folio && !voided && (
+                      {owner && p.invoice_folio && !voided && (
                         <div className="t-small" style={{ marginTop: 5 }}>
                           <Badge tone="blue">Facturado {p.invoice_folio}</Badge>{' '}
                           <a href={invoiceFileUrl(p.invoice_id!, 'pdf')} target="_blank" rel="noopener" className="btn-link">PDF</a>
@@ -121,8 +123,8 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
                     <div className="hstack" style={{ gap: 10, marginLeft: 'auto' }}>
                       <span className={`t-mono ${voided ? 'dim' : 'green'}`} style={{ fontSize: 14, textDecoration: voided ? 'line-through' : undefined }}>{money(p.amount_cents)}</span>
                       <a className="btn sm" href={receiptUrl(p.id)} target="_blank" rel="noopener" aria-label={`Recibo ${p.receipt_number} en PDF`}>{p.receipt_number}</a>
-                      {!voided && !p.invoice_id && p.amount_cents > 0 && <Button size="sm" onClick={() => setInvoicing(p.id)}>Facturar</Button>}
-                      {p.voidable && <Button size="sm" variant="danger" onClick={() => setVoiding(p)}
+                      {owner && !voided && !p.invoice_id && p.amount_cents > 0 && <Button size="sm" onClick={() => setInvoicing(p.id)}>Facturar</Button>}
+                      {owner && p.voidable && <Button size="sm" variant="danger" onClick={() => setVoiding(p)}
                         title={p.invoice_id ? 'Cancela primero la factura de este pago' : undefined}>Anular</Button>}
                     </div>
                   </div>
@@ -146,20 +148,20 @@ export function MembershipPanel({ patientId }: { patientId: string }) {
         </Card>
       )}
 
-      {owner && (
+      {front && (
         <>
           <PaymentSheet open={paying} onClose={() => setPaying(false)} patientId={patientId} patientName={name} billing={m} />
           <PaymentLinkSheet open={linking} onClose={() => setLinking(false)} patientId={patientId} patientName={name} phone={data.patient.phone} billing={m} />
-          <InvoiceSheet open={!!invoicing} onClose={() => setInvoicing(null)} patientId={patientId} patientName={name}
-            payments={data.payments ?? []} preselect={invoicing ?? undefined} />
+          {owner && <InvoiceSheet open={!!invoicing} onClose={() => setInvoicing(null)} patientId={patientId} patientName={name}
+            payments={data.payments ?? []} preselect={invoicing ?? undefined} />}
           <PlanPickerSheet open={!!picker} onClose={() => setPicker(null)} patientId={patientId} patientName={name}
             mode={picker ?? 'assign'} currentPlanId={m?.plan_id} />
           <Confirm open={confirm === 'pause'} onClose={() => setConfirm(null)} onConfirm={() => act('pause')} title="Pausar membresía"
             confirmLabel="Pausar" message={`La membresía de ${name} deja de contar días. Al reanudarla, el vencimiento se recorre lo que haya durado la pausa.`} />
           <Confirm open={confirm === 'resume'} onClose={() => setConfirm(null)} onConfirm={() => act('resume')} title="Reanudar membresía"
             confirmLabel="Reanudar" message={`La membresía de ${name} vuelve a estar activa y su vencimiento se recorre los días que estuvo en pausa.`} />
-          <VoidOnlineSheet payment={voiding?.refundable ? voiding : null} onClose={() => setVoiding(null)} onConfirm={doVoid} />
-          <Confirm open={!!voiding && !voiding.refundable} onClose={() => setVoiding(null)} onConfirm={(r) => doVoid(r)} danger reason="required" reasonLabel="Motivo de la anulación"
+          {owner && <VoidOnlineSheet payment={voiding?.refundable ? voiding : null} onClose={() => setVoiding(null)} onConfirm={doVoid} />}
+          <Confirm open={owner && !!voiding && !voiding.refundable} onClose={() => setVoiding(null)} onConfirm={(r) => doVoid(r)} danger reason="required" reasonLabel="Motivo de la anulación"
             title={`Anular pago ${voiding?.receipt_number ?? ''}`} confirmLabel="Anular pago"
             message={voiding ? `Se anulará el pago de ${money(voiding.amount_cents)} del ${fmtDate(voiding.paid_on)} y la membresía regresará a como estaba antes de ese pago. El recibo queda marcado como anulado; no se borra.` : ''} />
         </>

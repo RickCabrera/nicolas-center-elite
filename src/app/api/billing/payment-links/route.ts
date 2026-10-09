@@ -12,8 +12,8 @@ const Query = z.preprocess(dropEmpty, z.object({
   offset: z.string().optional(),
 }));
 
-// PAG-12 · Links de pago en línea (solo dueño). status=active → los que siguen esperando o requieren revisión.
-export const GET = route({ auth: 'owner', query: Query }, async ({ db, query }) => {
+// PAG-12 · Links de pago en línea (dueño o recepción). status=active → los que siguen esperando o requieren revisión.
+export const GET = route({ auth: 'front', query: Query }, async ({ db, query }) => {
   const { limit, offset } = paging(query, 200, 50);
   const where = db`where true
     ${query.patient_id ? db`and k.patient_id = ${query.patient_id}` : db``}
@@ -38,4 +38,4 @@ const Body = z.object({
 });
 
 // PAG-12 · Genera el link de pago de la mensualidad (Stripe Checkout).
-export const POST = route({ auth: 'owner', body: Body }, async ({ db, user, body }) => createPaymentLink(db, user, body));
+export const POST = route({ auth: 'front', body: Body }, async ({ db, user, body }) => createPaymentLink(db, user, body));

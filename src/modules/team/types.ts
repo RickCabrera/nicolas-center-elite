@@ -10,12 +10,18 @@ export type WorkloadRow = {
 export type Workload = { today: string; week_from: string; week_to: string; items: WorkloadRow[] };
 
 export type TeamUserDetail = {
-  id: string; username: string; email: string; role: 'owner' | 'therapist'; full_name: string; title: string; display_name: string;
+  id: string; username: string; email: string; role: 'owner' | 'therapist' | 'reception'; full_name: string; title: string; display_name: string;
   specialty: string; location_id: string | null; location_name: string | null; phone: string;
   license_number: string | null; license_institution: string | null; specialty_license: string | null;
   is_physician: boolean; active: boolean; deactivated_at: string | null; last_login_at: string | null;
   fingerprint_enrolled_at: string | null; created_at: string; has_password: boolean; invited_pending: boolean;
   patients_active?: number; patients_inactive?: number; future_appointments?: number;
+};
+
+/** Renglón de `GET /api/users` (lista simple de cuentas). */
+export type StaffRow = {
+  id: string; username: string; email: string; role: 'owner' | 'therapist' | 'reception'; full_name: string; title: string;
+  display_name: string; specialty: string; location_id: string | null; location_name: string | null; is_physician: boolean; active: boolean;
 };
 
 export type InviteResult = { kind?: 'invite' | 'reset'; email?: string; invite_link: string; email_status: 'sent' | 'logged' | 'error'; expires_hours?: number };

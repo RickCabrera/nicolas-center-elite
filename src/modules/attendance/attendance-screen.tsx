@@ -39,7 +39,7 @@ function LiveTab() {
   const isToday = date === today;
 
   const status = useApi<{ devices: ReaderStatus[] }>('/api/attendance/status', { refreshInterval: 5000 });
-  const listKey = `/api/attendance${qs({ date, role: role === 'all' ? '' : role, location_id: user.isOwner ? location : '' })}`;
+  const listKey = `/api/attendance${qs({ date, role: role === 'all' ? '' : role, location_id: user.isFront ? location : '' })}`;
   // HUE-10 · En vivo: se vuelve a consultar cada 3 s mientras se mira el día de hoy.
   const list = useApi<AttendanceList>(listKey, { refreshInterval: isToday ? 3000 : 0 });
 
@@ -89,8 +89,8 @@ function LiveTab() {
 
   const devices = useMemo(() => {
     const all = status.data?.devices ?? [];
-    return user.isOwner && location ? all.filter((d) => d.location_id === location) : all;
-  }, [status.data, user.isOwner, location]);
+    return user.isFront && location ? all.filter((d) => d.location_id === location) : all;
+  }, [status.data, user.isFront, location]);
 
   const actions = (
     <div className="stack sm" style={{ width: '100%', maxWidth: 340 }}>
@@ -100,7 +100,7 @@ function LiveTab() {
   );
 
   const locName = (id: string) => meta?.locations.find((l) => l.id === id)?.name;
-  const emptySede = user.isOwner ? (location ? locName(location) : null) : user.location_name;
+  const emptySede = user.isFront ? (location ? locName(location) : null) : user.location_name;
   const items = list.data?.date === date ? list.data.items : undefined;
 
   return (
@@ -132,7 +132,7 @@ function LiveTab() {
             <Chip on={role === 'staff'} onClick={() => setRole('staff')}>Personal</Chip>
           </div>
           <div className="grow" />
-          {user.isOwner && (
+          {user.isFront && (
             <Select aria-label="Sede" value={location} onChange={(e) => setLocation(e.target.value)} style={{ width: 'auto', minWidth: 150, minHeight: 40 }}>
               <option value="">Todas las sedes</option>
               {meta?.locations.filter((l) => l.active).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -282,7 +282,7 @@ function ManualSheet({ open, onClose, onSaved }: { open: boolean; onClose: () =>
     }
   };
 
-  const staff = (meta?.therapists ?? []).filter((t) => t.active);
+  const staff = [...(meta?.therapists ?? []), ...(meta?.reception ?? [])].filter((t) => t.active);
   return (
     <Sheet open={open} onClose={onClose} title="Registro manual"
       footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={saving} onClick={save}>Registrar asistencia</Button></>}>

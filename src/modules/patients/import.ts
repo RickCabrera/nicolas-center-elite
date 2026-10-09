@@ -20,7 +20,9 @@ const FIELD_LABEL: Record<string, string> = {
   guardian_relationship: 'tutor_parentesco', guardian_phone: 'tutor_telefono', reason: 'motivo',
 };
 
-export async function analyzeImport(db: Tx, csv: string): Promise<{ rows: AnalyzedRow[]; valid: number; invalid: number }> {
+export async function analyzeImport(db: Tx, csv: string, opts: { clinical?: boolean } = {}): Promise<{ rows: AnalyzedRow[]; valid: number; invalid: number }> {
+  // AUTH-10 · Sin `clinical` (recepción) el motivo de consulta y las etiquetas del archivo se descartan.
+  const clinical = opts.clinical ?? true;
   if (csv.length > IMPORT_MAX_CHARS) throw badRequest('El archivo es demasiado grande. Divídelo en partes de hasta 2,000 pacientes.', { csv: 'Archivo demasiado grande.' });
   const records = parseCsv(csv);
   if (!records.length) throw badRequest('El archivo está vacío.', { csv: 'El archivo está vacío.' });
@@ -72,7 +74,7 @@ export async function analyzeImport(db: Tx, csv: string): Promise<{ rows: Analyz
 
     // Etiquetas separadas por |
     const tags: string[] = [];
-    for (const raw of get('etiquetas').split('|').map((t) => t.trim()).filter(Boolean)) {
+    for (const raw of (clinical ? get('etiquetas') : '').split('|').map((t) => t.trim()).filter(Boolean)) {
       const tag = cats.tags.find((t) => normText(t) === normText(raw));
       if (!tag) errors.push(`etiquetas: no existe la etiqueta "${raw}".`);
       else if (!tags.includes(tag)) tags.push(tag);
@@ -84,7 +86,7 @@ export async function analyzeImport(db: Tx, csv: string): Promise<{ rows: Analyz
       phone: get('telefono'), email: get('correo'), address: get('domicilio'), curp: get('curp'),
       emergency_name: get('emergencia_nombre'), emergency_phone: get('emergencia_telefono'),
       guardian_name: get('tutor_nombre'), guardian_relationship: get('tutor_parentesco'), guardian_phone: get('tutor_telefono'),
-      location_id: loc?.id ?? '00000000-0000-4000-8000-000000000000', tags, reason: get('motivo'),
+      location_id: loc?.id ?? '00000000-0000-4000-8000-000000000000', tags, reason: clinical ? get('motivo') : '',
     });
 
     let input: PatientInput | undefined;
@@ -119,7 +121,7 @@ export async function analyzeImport(db: Tx, csv: string): Promise<{ rows: Analyz
         location_name: loc?.name ?? get('sede'),
         therapist_name: ther?.display_name ?? get('fisioterapeuta'),
         plan_name: plan?.name ?? get('membresia'),
-        reason: input?.reason ?? get('motivo'),
+        reason: clinical ? input?.reason ?? get('motivo') : '',
         tags,
       },
       ...(ok ? { input, therapist_id: ther!.id, plan_id: plan?.id ?? null } : {}),

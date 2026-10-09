@@ -208,7 +208,7 @@ describe('CFG-02 · sedes', () => {
     expect(t.data.map((l: { code: string }) => l.code).sort()).toEqual(['COR', 'ORI']);
     expect(t.data[0].active_patients).toBeUndefined();
     const o = await call(locationsGET, { as: fx.owner });
-    expect(o.data.find((l: { code: string }) => l.code === 'COR')).toMatchObject({ active_patients: 2, active_users: 2, documents_count: 0 });
+    expect(o.data.find((l: { code: string }) => l.code === 'COR')).toMatchObject({ active_patients: 2, active_users: 3, documents_count: 0 }); // Karla, Mariana y Rocío (recepción)
   });
 
   it('alta: valida, exige dueño y rechaza clave o nombre repetidos con 409', async () => {
@@ -236,7 +236,7 @@ describe('CFG-02 · sedes', () => {
     expect(off.status).toBe(409);
     expect(off.error!.code).toBe('location_in_use');
     expect(off.error!.message).toContain('2 pacientes activos');
-    expect(off.error!.message).toContain('2 usuarios activos asignados');
+    expect(off.error!.message).toContain('3 usuarios activos asignados');
 
     // una sede sin nadie sí se desactiva y se reactiva
     const offX = await call(locationPATCH, { as: fx.owner, method: 'PATCH', params: { id: xalapa }, body: { active: false } });

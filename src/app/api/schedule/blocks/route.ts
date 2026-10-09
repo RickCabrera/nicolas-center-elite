@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { route } from '@/lib/api';
+import { isFrontDesk, route } from '@/lib/api';
 import { fmtDate, localToInstant } from '@/lib/dates';
 import { badRequest, forbidden, notFound } from '@/lib/errors';
 import { assertScheduleOwner, DateStr, TimeStr } from '@/modules/agenda/server';
@@ -8,9 +8,11 @@ import { NextResponse } from 'next/server';
 const Query = z.object({ user_id: z.uuid().optional(), from: DateStr.optional(), to: DateStr.optional() });
 
 // AGE-07 · Bloqueos (vacaciones, permisos…) de un usuario que tocan el rango. Sin rango: los vigentes y futuros.
+// AUTH-10 · El dueño y recepción ven los de todos (los necesitan para agendar); solo el dueño y el propio fisioterapeuta los crean.
 export const GET = route({ auth: 'user', query: Query }, async ({ db, user, query }) => {
-  const userId = query.user_id ?? (user.role === 'owner' ? null : user.id);
-  if (user.role !== 'owner' && userId !== user.id) throw forbidden('Solo puedes ver tus propios bloqueos.');
+  const front = isFrontDesk(user);
+  const userId = query.user_id ?? (front ? null : user.id);
+  if (!front && userId !== user.id) throw forbidden('Solo puedes ver tus propios bloqueos.');
   const from = query.from ? localToInstant(query.from) : null;
   const to = query.to ? localToInstant(query.to, '23:59') : null;
   return db`
@@ -34,7 +36,7 @@ const Body = z.object({
 });
 
 // AGE-07 · Crea un bloqueo. Si dentro ya hay citas programadas responde 409 con la lista, salvo `force: true`.
-export const POST = route({ auth: 'user', body: Body }, async ({ db, user, body }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, user, body }) => {
   assertScheduleOwner(user, body.user_id);
   const [u] = await db`select id from users where id = ${body.user_id}`;
   if (!u) throw notFound('Usuario no encontrado.');

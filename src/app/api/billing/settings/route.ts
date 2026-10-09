@@ -20,7 +20,17 @@ async function view(db: Parameters<Parameters<typeof route>[1]>[0]['db']) {
 }
 
 // PAG-12 · FAC-05 · Parámetros de cobro en línea y facturación, y estado de las conexiones (solo dueño).
-export const GET = route({ auth: 'owner' }, async ({ db }) => view(db));
+// AUTH-10 · Recepción genera links de pago: recibe solo lo que esa hoja necesita (si el cobro en línea está
+// disponible y qué formas de pago admite), sin parámetros de facturación ni datos del webhook.
+export const GET = route({ auth: 'front' }, async ({ db, user }) => {
+  const v = await view(db);
+  if (user.role === 'owner') return v;
+  const { online_payments_enabled, oxxo_enabled, payment_link_hours, oxxo_days } = v.settings;
+  return {
+    settings: { online_payments_enabled, oxxo_enabled, payment_link_hours, oxxo_days },
+    integrations: { stripe: { configured: v.integrations.stripe.configured, live: v.integrations.stripe.live } },
+  };
+});
 
 const Body = z.object({
   online_payments_enabled: z.boolean().optional(),

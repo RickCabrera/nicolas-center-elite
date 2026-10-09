@@ -11,7 +11,10 @@ import type { Dashboard } from './types';
 
 const moreLink = { display: 'inline-flex', alignItems: 'center' } as const;
 
-/** DASH-01..04 · Panel de inicio: indicadores, citas de hoy, asistencias y mensualidades por atender. */
+/**
+ * DASH-01..04 · Panel de inicio: indicadores, citas de hoy, asistencias y mensualidades por atender.
+ * AUTH-10 · Recepción ve el mismo tablero del mostrador que el dueño (todas las sedes, con filtro).
+ */
 export function DashboardView() {
   const user = useUser();
   const { meta } = useMeta();
@@ -21,9 +24,9 @@ export function DashboardView() {
 
   // DASH-03 · La sede elegida vive en la URL (?sede=cor) para que el filtro sobreviva a recargas y enlaces.
   const locations = (meta?.locations ?? []).filter((l) => l.active);
-  const code = user.isOwner ? (params.get('sede') ?? '').toUpperCase() : '';
+  const code = user.isFront ? (params.get('sede') ?? '').toUpperCase() : '';
   const selected = locations.find((l) => l.code === code) ?? null;
-  const waitingMeta = user.isOwner && !!code && !meta;
+  const waitingMeta = user.isFront && !!code && !meta;
   const setLocation = (c: string | null) => {
     const p = new URLSearchParams(params.toString());
     if (c) p.set('sede', c.toLowerCase()); else p.delete('sede');
@@ -38,17 +41,17 @@ export function DashboardView() {
   const today = data?.today ?? todayIso();
   const dateLabel = data?.date_label ?? longDate(today);
   const allNames = locations.map((l) => l.name).join(' + ');
-  const sub = user.isOwner
+  const sub = user.isFront
     ? `${selected ? selected.name : allNames || 'Todas las sedes'} · ${dateLabel}`
     : `Pacientes asignados · ${user.location_name ?? 'Sin sede asignada'}`;
-  const scopeNote = !user.isOwner ? 'Asignados a ti' : selected ? `Sede ${selected.name}` : locations.length === 2 ? 'Ambas sedes' : 'Todas las sedes';
+  const scopeNote = !user.isFront ? 'Asignados a ti' : selected ? `Sede ${selected.name}` : locations.length === 2 ? 'Ambas sedes' : 'Todas las sedes';
   const s = data?.stats;
 
   return (
     <div className="page" style={{ gap: 18 }}>
-      <PageHeader title={user.isOwner ? 'Panel general' : 'Mi panel'} sub={sub} />
+      <PageHeader title={user.isReception ? 'Panel de recepción' : user.isFront ? 'Panel general' : 'Mi panel'} sub={sub} />
 
-      {user.isOwner && locations.length > 1 && (
+      {user.isFront && locations.length > 1 && (
         <div className="scroll-x" role="group" aria-label="Sede" style={{ marginTop: -6 }}>
           <Chip on={!selected} onClick={() => setLocation(null)}>Todas</Chip>
           {locations.map((l) => <Chip key={l.id} on={selected?.id === l.id} onClick={() => setLocation(l.code)}>{l.name}</Chip>)}
@@ -62,7 +65,7 @@ export function DashboardView() {
           <div className="grid-stats">
             <StatCard label="Pacientes activos" value={s!.patients_active} note={scopeNote} color="var(--ink)" />
             <StatCard label="Citas de hoy" value={s!.appointments_today} note={dateLabel} color="var(--blue)" />
-            <StatCard label="Mensualidades por vencer" value={s!.due} note={user.isOwner ? 'Incluye vencidas' : 'De tus pacientes'} color="var(--gold)" />
+            <StatCard label="Mensualidades por vencer" value={s!.due} note={user.isFront ? 'Incluye vencidas' : 'De tus pacientes'} color="var(--gold)" />
             <StatCard label="Asistencias por huella" value={s!.attendance_today} note="Registradas hoy" color="var(--green)" />
           </div>
 
@@ -93,7 +96,7 @@ export function DashboardView() {
               <div className="stack sm">
                 {data.recent_attendance.length === 0 && <Empty>Aún no hay asistencias registradas hoy.</Empty>}
                 {data.recent_attendance.map((r) => (
-                  <Link key={r.id} href={user.isOwner && r.patient_id ? `/pacientes/${r.patient_id}` : '/huella'} className="row">
+                  <Link key={r.id} href={user.isFront && r.patient_id ? `/pacientes/${r.patient_id}` : '/huella'} className="row">
                     <div className={`dot ${r.direction === 'out' ? 'off' : ''}`} />
                     <div className="grow">
                       <div className="t-strong ellipsis">{r.person_name}</div>
@@ -106,7 +109,7 @@ export function DashboardView() {
             </Card>
           </div>
 
-          {user.isOwner && data.due_payments && (
+          {user.isFront && data.due_payments && (
             <Card title="Mensualidades por atender" action={<Link href="/mensualidades" className="btn-link" style={moreLink}>Ver mensualidades</Link>}>
               <div className="stack sm">
                 {data.due_payments.length === 0 && <Empty>Todas las mensualidades están al corriente.</Empty>}

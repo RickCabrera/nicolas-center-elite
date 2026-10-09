@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { route } from '@/lib/api';
+import { isFrontDesk, route } from '@/lib/api';
 import { localToInstant } from '@/lib/dates';
 import { badRequest, conflict } from '@/lib/errors';
 import { assertSlot, checkNotPast, DateStr, Duration, getAppointment, Notes, TimeStr, TypeName } from '@/modules/agenda/server';
@@ -26,13 +26,13 @@ export const PATCH = route({ auth: 'user', body: Body }, async ({ db, user, para
   const duration = body.duration_min ?? cur.duration_min;
   const starts = localToInstant(date, time);
 
-  // Solo el dueño cambia de fisioterapeuta; lo que mande un fisioterapeuta se ignora.
+  // Solo el dueño y recepción cambian de fisioterapeuta; lo que mande un fisioterapeuta se ignora.
   let therapistId = cur.therapist_id;
   let locationId = cur.location_id;
-  if (user.role === 'owner' && body.therapist_id && body.therapist_id !== cur.therapist_id) {
-    const [t] = await db<{ id: string; location_id: string | null; active: boolean }[]>`
-      select id, location_id, active from users where id = ${body.therapist_id}`;
-    if (!t || !t.active) throw badRequest('Ese fisioterapeuta no está disponible.', { therapist_id: 'Fisioterapeuta no disponible.' });
+  if (isFrontDesk(user) && body.therapist_id && body.therapist_id !== cur.therapist_id) {
+    const [t] = await db<{ id: string; location_id: string | null; active: boolean; role: string }[]>`
+      select id, location_id, active, role from users where id = ${body.therapist_id}`;
+    if (!t || !t.active || t.role === 'reception') throw badRequest('Ese fisioterapeuta no está disponible.', { therapist_id: 'Fisioterapeuta no disponible.' });
     therapistId = t.id;
     locationId = t.location_id ?? cur.location_id;
   }

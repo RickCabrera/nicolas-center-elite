@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import type { SessionUser } from '@/lib/auth/session';
+import type { Role } from '@/lib/db';
 import { api } from '@/lib/client';
 import { shortName } from '@/lib/format';
 import { Icon } from './icons';
@@ -11,9 +12,23 @@ import { UserProvider, useUser } from './user-context';
 
 type Item = { href: string; icon: string; label: string; short: string };
 
+/** Etiqueta visible de cada rol (AUTH-10). */
+export const ROLE_LABEL: Record<Role, string> = { owner: 'Dueño / Director', therapist: 'Fisioterapeuta', reception: 'Recepción' };
+
 /** Menú por rol (AUTH-07): lo que no aparece aquí tampoco responde en la API para ese rol. */
-export function navFor(role: 'owner' | 'therapist'): Item[] {
+export function navFor(role: Role): Item[] {
   const owner = role === 'owner';
+  // AUTH-10 · Recepción: solo lo administrativo. Sin Recetas, Estudios, Configuración ni Equipo.
+  if (role === 'reception') {
+    return [
+      { href: '/inicio', icon: 'dash', label: 'Inicio', short: 'Inicio' },
+      { href: '/pacientes', icon: 'pacientes', label: 'Pacientes', short: 'Pacientes' },
+      { href: '/agenda', icon: 'agenda', label: 'Agenda', short: 'Agenda' },
+      { href: '/mensualidades', icon: 'pagos', label: 'Mensualidades', short: 'Pagos' },
+      { href: '/huella', icon: 'huella', label: 'Control de huella', short: 'Huella' },
+      { href: '/perfil', icon: 'perfil', label: 'Mi perfil', short: 'Perfil' },
+    ];
+  }
   return [
     { href: '/inicio', icon: 'dash', label: 'Inicio', short: 'Inicio' },
     { href: '/pacientes', icon: 'pacientes', label: owner ? 'Pacientes' : 'Mis pacientes', short: 'Pacientes' },
@@ -64,7 +79,7 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
             <div className="session-box">
               <div className="t-label">Sesión</div>
               <div style={{ marginTop: 8, font: '600 14px/1.2 var(--f-head)' }}>{user.display_name}</div>
-              <div className="t-small" style={{ marginTop: 3 }}>{user.role === 'owner' ? 'Dueño / Director' : user.specialty || 'Fisioterapeuta'}</div>
+              <div className="t-small" style={{ marginTop: 3 }}>{user.role === 'therapist' ? user.specialty || ROLE_LABEL.therapist : ROLE_LABEL[user.role]}</div>
               <button type="button" className="btn sm block" style={{ marginTop: 12, fontFamily: 'var(--f-mono)', letterSpacing: '.14em', fontSize: 10 }} onClick={logout}>Salir</button>
             </div>
           </aside>
@@ -115,7 +130,7 @@ export function PageHeader({ title, sub, back, action }: { title: string; sub?: 
         </div>
         {action}
         <Link href="/perfil" className={`rolechip no-print ${user.isOwner ? 'owner' : ''}`} title="Mi perfil">
-          {user.isOwner ? 'Dueño' : shortName(user.display_name)}
+          {user.isOwner ? 'Dueño' : user.isReception ? 'Recepción' : shortName(user.display_name)}
         </Link>
       </header>
       {back && <Link href={back.href} className="btn-link dim no-print" style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', marginTop: -6, marginBottom: 14 }}>← {back.label}</Link>}

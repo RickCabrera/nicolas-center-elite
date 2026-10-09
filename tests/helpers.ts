@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
-import { asSystem, asUser, type Identity, type Tx } from '@/lib/db';
+import { asSystem, asUser, type Identity, type Role, type Tx } from '@/lib/db';
 import { hashPassword } from '@/lib/auth/password';
 import { createSession, SESSION_COOKIE } from '@/lib/auth/session';
 
@@ -38,6 +38,7 @@ export type Fixtures = {
   therapistA: TestUser; // Córdoba · fisioterapeuta con cédula
   therapistB: TestUser; // Orizaba · fisioterapeuta con cédula
   physician: TestUser;  // Córdoba · marcada como médico con cédula
+  reception: TestUser;  // Córdoba · recepción (AUTH-10): administra a todos, sin acceso clínico
   cordoba: string;
   orizaba: string;
   plans: Record<string, string>; // nombre → id
@@ -46,9 +47,12 @@ export type Fixtures = {
   patientB1: string; // de B, adulto mayor, mensualidad vencida
 };
 
+/** Fixtures sin recepción: los arman por su cuenta algunas pruebas anteriores al rol (AUTH-10). */
+export type CoreFixtures = Omit<Fixtures, 'reception'>;
+
 export const TEST_PASSWORD = 'Prueba2026segura';
 
-async function makeUser(tx: Tx, u: { username: string; role: 'owner' | 'therapist'; full_name: string; title?: string; location_id?: string | null; license?: string | null; physician?: boolean; specialty?: string }, hash: string): Promise<TestUser> {
+async function makeUser(tx: Tx, u: { username: string; role: Role; full_name: string; title?: string; location_id?: string | null; license?: string | null; physician?: boolean; specialty?: string }, hash: string): Promise<TestUser> {
   const [row] = await tx<{ id: string }[]>`
     insert into users (username, email, password_hash, role, full_name, title, specialty, location_id, license_number, license_institution, is_physician)
     values (${u.username}, ${u.username + '@prueba.mx'}, ${hash}, ${u.role}, ${u.full_name}, ${u.title ?? ''}, ${u.specialty ?? ''},
@@ -58,7 +62,7 @@ async function makeUser(tx: Tx, u: { username: string; role: 'owner' | 'therapis
   return { id: row.id, role: u.role, username: u.username, token, location_id: u.location_id ?? null };
 }
 
-/** Deja la base con un dueño, tres profesionales y tres pacientes repartidos. Llama antes resetData(). */
+/** Deja la base con un dueño, tres profesionales, una persona de recepción y tres pacientes repartidos. Llama antes resetData(). */
 export async function fixtures(): Promise<Fixtures> {
   await resetData();
   const hash = await hashPassword(TEST_PASSWORD);
@@ -74,6 +78,8 @@ export async function fixtures(): Promise<Fixtures> {
     const therapistB = await makeUser(tx, { username: 'diego', role: 'therapist', full_name: 'Diego Salinas', title: 'L.F.T.', location_id: orizaba, license: '55667788', specialty: 'Columna' }, hash);
     const physician = await makeUser(tx, { username: 'mariana', role: 'therapist', full_name: 'Mariana Reyes', title: 'Dra.', location_id: cordoba, license: '99887766', physician: true, specialty: 'Medicina de rehabilitación' }, hash);
 
+    const reception = await makeUser(tx, { username: 'rocio', role: 'reception', full_name: 'Rocío Morales', location_id: cordoba }, hash);
+
     await tx`select set_config('app.user_id', ${owner.id}, true), set_config('app.user_role', 'owner', true)`;
     const patient = async (p: { name: string; birth: string; ther: string; loc: string; guardian?: string; plan: string; due: number; sessions?: number | null }) => {
       const [row] = await tx<{ id: string }[]>`
@@ -87,7 +93,7 @@ export async function fixtures(): Promise<Fixtures> {
     const patientA1 = await patient({ name: 'Ana Prueba Uno', birth: '1990-05-10', ther: therapistA.id, loc: cordoba, plan: 'Mensual Elite', due: 20 });
     const patientA2 = await patient({ name: 'Beto Prueba Dos', birth: '2016-03-14', ther: therapistA.id, loc: cordoba, guardian: 'Lucía Prueba', plan: 'Paquete 10 sesiones', due: 40, sessions: 10 });
     const patientB1 = await patient({ name: 'Carmen Prueba Tres', birth: '1955-01-30', ther: therapistB.id, loc: orizaba, plan: 'Plan Senior', due: -5 });
-    return { owner, therapistA, therapistB, physician, cordoba, orizaba, plans, patientA1, patientA2, patientB1 };
+    return { owner, therapistA, therapistB, physician, reception, cordoba, orizaba, plans, patientA1, patientA2, patientB1 };
   });
 }
 

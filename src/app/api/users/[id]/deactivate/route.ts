@@ -24,6 +24,7 @@ async function removeFingerprint(tx: Tx, userId: string, ownerId: string): Promi
   return 'queued';
 }
 
+// AUTH-10 · Una cuenta de recepción no tiene pacientes ni citas: su baja no pide reasignar nada.
 // EQ-04 / AUTH-09 · Baja de un fisioterapeuta. Todo ocurre en UNA transacción: o se reasigna y se
 // desactiva completo, o no cambia nada. Sus notas, recetas y firmas no se tocan (son inmutables y
 // guardan copia de su nombre y cédula).

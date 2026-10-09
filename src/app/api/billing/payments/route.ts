@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { paging, route } from '@/lib/api';
+import { forbidden } from '@/lib/errors';
 import { registerPayment } from '@/modules/billing/server';
 
 const dropEmpty = (v: unknown) =>
@@ -16,8 +17,11 @@ const Query = z.preprocess(dropEmpty, z.object({
   offset: z.string().optional(),
 }));
 
-// PAG-04 · Historial de pagos (solo dueño). Por defecto no incluye los anulados.
-export const GET = route({ auth: 'owner', query: Query }, async ({ db, query }) => {
+// PAG-04 · Historial de pagos. Por defecto no incluye los anulados.
+// AUTH-10 · Recepción consulta el historial de UN paciente; el historial global con su total equivale a un
+// reporte de ingresos y sigue siendo del dueño.
+export const GET = route({ auth: 'front', query: Query }, async ({ db, user, query }) => {
+  if (user.role !== 'owner' && !query.patient_id) throw forbidden('El historial de pagos de toda la clínica es solo para el dueño.');
   const { limit, offset } = paging(query, 500, 100);
   const voided = query.include_voided === 'true' || query.include_voided === '1';
   const where = db`where true
@@ -55,7 +59,7 @@ const Body = z.object({
 });
 
 // PAG-04 · Registra un pago: recorre el vencimiento o carga sesiones según el tipo de plan.
-export const POST = route({ auth: 'owner', body: Body }, async ({ db, user, body }) => {
+export const POST = route({ auth: 'front', body: Body }, async ({ db, user, body }) => {
   const { payment, billing } = await registerPayment(db, user, body);
   return { payment, billing, state: billing.state };
 });

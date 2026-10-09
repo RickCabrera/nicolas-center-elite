@@ -36,7 +36,12 @@ const TABS = [
   { key: 'membresia', label: 'Membresía' },
   { key: 'accesos', label: 'Accesos' },
 ] as const;
-type TabKey = (typeof TABS)[number]['key'];
+// AUTH-10 · Recepción no ve nada clínico: solo la membresía y los documentos firmados del alta.
+const RECEPTION_TABS = [
+  { key: 'membresia', label: 'Membresía' },
+  { key: 'firmas', label: 'Documentos firmados' },
+] as const;
+type TabKey = (typeof TABS)[number]['key'] | 'firmas';
 type Open = null | 'rx' | 'study' | 'appointment' | 'edit' | 'status' | 'reassign' | 'more';
 
 function membershipText(p: PatientDetail): { main: string; detail: string } {
@@ -60,15 +65,18 @@ export function RecordScreen({ patientId }: { patientId: string }) {
 
   const patient = useApi<PatientDetail>(base);
   // El perfil se pide siempre, en cualquier pestaña: su lectura es la que registra el acceso al expediente.
-  const profile = useApi<ProfileData>(patient.data ? `${base}/profile` : null);
+  // Recepción no lo pide: la API le respondería 403.
+  const clinical = user.isClinical;
+  const profile = useApi<ProfileData>(patient.data && clinical ? `${base}/profile` : null);
   const consents = useApi<Consent[]>(patient.data ? `${base}/consents` : null);
 
-  const tabs = TABS.filter((t) => t.key !== 'accesos' || user.isOwner);
+  const tabs: readonly { key: TabKey; label: string }[] = clinical ? TABS.filter((t) => t.key !== 'accesos' || user.isOwner) : RECEPTION_TABS;
+  const firstTab: TabKey = clinical ? 'perfil' : 'membresia';
   const wanted = search.get('tab');
-  const tab: TabKey = tabs.find((t) => t.key === wanted)?.key ?? 'perfil';
+  const tab: TabKey = tabs.find((t) => t.key === wanted)?.key ?? firstTab;
   const setTab = (k: TabKey) => {
     const q = new URLSearchParams(search.toString());
-    if (k === 'perfil') q.delete('tab'); else q.set('tab', k);
+    if (k === firstTab) q.delete('tab'); else q.set('tab', k);
     const s = q.toString();
     router.replace(s ? `${pathname}?${s}` : pathname, { scroll: false });
   };
@@ -95,10 +103,11 @@ export function RecordScreen({ patientId }: { patientId: string }) {
   }, [isNew, loaded, toast]);
 
   const p = patient.data;
+  const title = clinical ? 'Expediente clínico' : 'Ficha del paciente';
   if (!p) {
     return (
       <div className="page">
-        <PageHeader title="Expediente clínico" back={{ href: '/pacientes', label: 'Pacientes' }} />
+        <PageHeader title={title} back={{ href: '/pacientes', label: 'Pacientes' }} />
         {patient.error
           ? patient.error.status === 404
             ? <Notice tone="red">No encontramos este expediente o no está asignado a ti. <Link href="/pacientes">Volver a pacientes</Link></Notice>
@@ -118,7 +127,7 @@ export function RecordScreen({ patientId }: { patientId: string }) {
 
   return (
     <div className="page">
-      <PageHeader title="Expediente clínico" sub={p.full_name} back={{ href: '/pacientes', label: 'Pacientes' }} />
+      <PageHeader title={title} sub={p.full_name} back={{ href: '/pacientes', label: 'Pacientes' }} />
 
       {inactive && (
         <Notice tone="red">
@@ -155,12 +164,19 @@ export function RecordScreen({ patientId }: { patientId: string }) {
           )}
         </div>
 
-        <div className="hstack wrap no-print" style={{ marginTop: 14 }}>
-          <Button variant="primary" onClick={more('rx')} disabled={inactive}>Nueva receta</Button>
-          <Button onClick={() => setNote({ open: true, addendumOf: null })}>Agregar nota</Button>
-          <Button variant="gold" onClick={more('study')}>Subir estudio</Button>
-          <Button onClick={more('more')} aria-haspopup="dialog">Más</Button>
-        </div>
+        {clinical ? (
+          <div className="hstack wrap no-print" style={{ marginTop: 14 }}>
+            <Button variant="primary" onClick={more('rx')} disabled={inactive}>Nueva receta</Button>
+            <Button onClick={() => setNote({ open: true, addendumOf: null })}>Agregar nota</Button>
+            <Button variant="gold" onClick={more('study')}>Subir estudio</Button>
+            <Button onClick={more('more')} aria-haspopup="dialog">Más</Button>
+          </div>
+        ) : (
+          <div className="hstack wrap no-print" style={{ marginTop: 14 }}>
+            <Button variant="primary" onClick={more('appointment')} disabled={inactive}>Agendar cita</Button>
+            <Button onClick={more('edit')}>Editar datos</Button>
+          </div>
+        )}
       </section>
 
       {showChecklist && (
@@ -170,17 +186,20 @@ export function RecordScreen({ patientId }: { patientId: string }) {
 
       <Tabs tabs={tabs.map((t) => ({ key: t.key, label: t.label }))} value={tab} onChange={setTab} />
 
-      {tab === 'perfil' && (
+      {tab === 'perfil' && clinical && (
         <div className="stack">
           <ProfileTab patientId={p.id} reason={p.reason} data={profile.data} error={profile.error} loading={profile.isLoading} reload={() => profile.mutate()} />
           <SignedDocuments consents={consents.data} loading={consents.isLoading} error={consents.error} retry={() => consents.mutate()} onSign={setConsentKind} />
         </div>
       )}
-      {tab === 'sesiones' && (
+      {tab === 'sesiones' && clinical && (
         <NotesTab patientId={p.id} onAdd={() => setNote({ open: true, addendumOf: null })} onAddendum={(n) => setNote({ open: true, addendumOf: n })} />
       )}
-      {tab === 'estudios' && <PatientStudies patientId={p.id} />}
-      {tab === 'recetas' && <PatientDocuments patientId={p.id} />}
+      {tab === 'estudios' && clinical && <PatientStudies patientId={p.id} />}
+      {tab === 'recetas' && clinical && <PatientDocuments patientId={p.id} />}
+      {tab === 'firmas' && !clinical && (
+        <SignedDocuments consents={consents.data} loading={consents.isLoading} error={consents.error} retry={() => consents.mutate()} onSign={setConsentKind} />
+      )}
       {tab === 'membresia' && <MembershipPanel patientId={p.id} />}
       {tab === 'accesos' && user.isOwner && <AccessTab patientId={p.id} />}
 
@@ -199,15 +218,15 @@ export function RecordScreen({ patientId }: { patientId: string }) {
         </div>
       </Sheet>
 
-      <NewDocumentSheet open={open === 'rx'} onClose={close} patientId={p.id} />
-      <UploadStudySheet open={open === 'study'} onClose={close} patientId={p.id} onDone={() => refresh('/api/studies', base)} />
+      {clinical && <NewDocumentSheet open={open === 'rx'} onClose={close} patientId={p.id} />}
+      {clinical && <UploadStudySheet open={open === 'study'} onClose={close} patientId={p.id} onDone={() => refresh('/api/studies', base)} />}
       <NewAppointmentSheet open={open === 'appointment'} onClose={close} patientId={p.id} onSaved={() => refresh('/api/appointments')} />
       <EditPatientSheet open={open === 'edit'} onClose={close} patient={p} onSaved={reloadPatient} />
-      <PatientStatusSheet open={open === 'status'} onClose={close} patientId={p.id} status={p.status} onDone={reloadPatient} />
+      {user.isOwner && <PatientStatusSheet open={open === 'status'} onClose={close} patientId={p.id} status={p.status} onDone={reloadPatient} />}
       {user.isOwner && (
         <ReassignPatientSheet open={open === 'reassign'} onClose={close} patientId={p.id} patientName={p.full_name} therapistId={p.therapist_id} onDone={reloadPatient} />
       )}
-      <NoteSheet open={note.open} onClose={() => setNote((n) => ({ ...n, open: false }))} patientId={p.id} addendumOf={note.addendumOf} />
+      {clinical && <NoteSheet open={note.open} onClose={() => setNote((n) => ({ ...n, open: false }))} patientId={p.id} addendumOf={note.addendumOf} />}
       {consentKind && (
         <ConsentSheet open onClose={() => setConsentKind(null)} patientId={p.id} kind={consentKind} />
       )}

@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { Badge, Button, Chip, Confirm, Empty, ErrorNote, Notice, Skeleton, useToast } from '@/components/ui';
+import { useUser } from '@/components/user-context';
 import { api, ApiError, qs, refresh, useApi } from '@/lib/client';
 import { fmtDateTime } from '@/lib/dates';
 import { money, PAYMENT_METHOD_LABEL } from '@/lib/format';
@@ -23,6 +24,7 @@ const FILTERS: { key: string; label: string }[] = [
 
 // PAG-12 · Mensualidades → Cobros en línea: links generados, su estado y la resolución de los que requieren revisión.
 export function OnlineLinks() {
+  const user = useUser();
   const toast = useToast();
   const [status, setStatus] = useState('active');
   const { data, error, mutate } = useApi<List>('/api/billing/payment-links' + qs({ status }), { refreshInterval: 15000 });
@@ -55,7 +57,7 @@ export function OnlineLinks() {
     <div className="stack">
       {review > 0 && status !== 'needs_review' && (
         <Notice tone="red">
-          {review === 1 ? 'Un pago en línea requiere' : `${review} pagos en línea requieren`} tu revisión: el paciente pagó, pero su membresía cambió
+          {review === 1 ? 'Un pago en línea requiere' : `${review} pagos en línea requieren`} {user.isOwner ? 'tu revisión' : 'la revisión del dueño'}: el paciente pagó, pero su membresía cambió
           antes de que llegara el pago.{' '}
           <button type="button" className="btn-link" onClick={() => setStatus('needs_review')}>Ver</button>
         </Notice>
@@ -104,7 +106,8 @@ export function OnlineLinks() {
                     <a className="btn sm" href={shareLink(l.patient_name ?? '', l)} target="_blank" rel="noopener">WhatsApp</a>
                     <Button size="sm" variant="danger" onClick={() => setConfirm({ link: l, action: 'cancel' })}>Cancelar</Button>
                   </>}
-                  {l.status === 'needs_review' && <>
+                  {/* AUTH-10 · Aplicar o reembolsar un pago en revisión lo decide el dueño. */}
+                  {l.status === 'needs_review' && user.isOwner && <>
                     <Button size="sm" variant="primary" onClick={() => setConfirm({ link: l, action: 'apply' })}>Aplicar al plan vigente</Button>
                     <Button size="sm" variant="danger" onClick={() => setConfirm({ link: l, action: 'refund' })}>Reembolsar</Button>
                   </>}

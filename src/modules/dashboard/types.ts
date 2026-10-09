@@ -12,7 +12,7 @@ export type Dashboard = {
     therapist_name: string; status: 'scheduled' | 'attended' | 'no_show';
   }[];
   recent_attendance: {
-    id: string; person_name: string; person_type: 'patient' | 'staff'; role_label: 'Paciente' | 'Fisioterapeuta';
+    id: string; person_name: string; person_type: 'patient' | 'staff'; role_label: 'Paciente' | 'Fisioterapeuta' | 'Dirección' | 'Recepción';
     patient_id: string | null; location_name: string; occurred_at: string; time: string; direction: 'in' | 'out';
   }[];
   due_payments?: { patient_id: string; full_name: string; plan_name: string; next_due_date: string; state: BillingState }[];

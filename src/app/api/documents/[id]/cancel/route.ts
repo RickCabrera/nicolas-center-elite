@@ -8,7 +8,7 @@ const Body = z.object({
 });
 
 // REC-05 · Cancela un documento emitido (dueño o emisor). No se borra y conserva su folio.
-export const POST = route({ auth: 'user', body: Body }, async ({ db, user, params, body }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, user, params, body }) => {
   const doc = await loadDocument(db, params.id, user);
   if (!doc) throw notFound('Documento no encontrado.');
   if (user.role !== 'owner' && doc.issuer_id !== user.id) throw forbidden('Solo quien emitió el documento o el dueño pueden cancelarlo.');

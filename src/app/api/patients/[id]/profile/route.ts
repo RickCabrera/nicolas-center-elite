@@ -13,7 +13,7 @@ const VIEW_WINDOW_MIN = 10;
 
 // EXP-02 · Perfil clínico vigente y lista de versiones. `?version=N` devuelve esa versión completa.
 // EXP-01 · Abrir el expediente deja un evento `view` (máximo uno cada 10 minutos por usuario y paciente).
-export const GET = route({ auth: 'user' }, async ({ db, user, params, query, system }) => {
+export const GET = route({ auth: 'clinical' }, async ({ db, user, params, query, system }) => {
   const patient = await requirePatient(db, params.id);
 
   if (query.version !== undefined) {
@@ -54,7 +54,7 @@ const Body = z.object({
 });
 
 // EXP-02 · Cada guardado crea una versión nueva; las anteriores no se tocan.
-export const POST = route({ auth: 'user', body: Body }, async ({ db, user, params, body }) => {
+export const POST = route({ auth: 'clinical', body: Body }, async ({ db, user, params, body }) => {
   const patient = await requirePatient(db, params.id);
   if (!Object.values(body).some((v) => v.length > 0)) {
     throw badRequest('Captura al menos un campo del perfil clínico.', { diagnosis: 'Escribe el diagnóstico o algún otro campo.' });

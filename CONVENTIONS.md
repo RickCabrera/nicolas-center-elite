@@ -5,8 +5,11 @@ Cada tarea tiene un ID (PAC-03, HUE-07…): cítalo en un comentario donde la im
 
 ## 1. Qué es esto
 
-Sistema clínico de un centro de fisioterapia con dos sedes (Córdoba y Orizaba, Ver.). Dos roles:
-**dueño** (`owner`, ve todo) y **fisioterapeuta** (`therapist`, solo sus pacientes y lo derivado).
+Sistema clínico de un centro de fisioterapia con dos sedes (Córdoba y Orizaba, Ver.). Tres roles:
+**dueño** (`owner`, ve todo), **fisioterapeuta** (`therapist`, solo sus pacientes y lo derivado) y
+**recepción** (`reception`, AUTH-10: lo administrativo y de cobranza de todos los pacientes de todas las sedes,
+**nunca** información clínica; NOM-004-SSA3-2012). Criterio para cualquier pantalla o ruta nueva:
+administrativo y de cobranza sí; clínico no; configuración no.
 Toda la interfaz está en **español de México**. La referencia visual es el mockup aprobado:
 `/mnt/user-data/uploads/Nicolas_Center_Elite_dc.html` (plantilla en las líneas 31-889, lógica en 890-1299).
 La pantalla real debe verse como el mockup; lo que cambia de fondo está en la sección "Mockup vs sistema real" del backlog.
@@ -20,12 +23,12 @@ Sin Tailwind: estilos en `src/app/globals.css` (clases) + estilos en línea para
 ## 3. Estructura y propiedad de archivos
 
 ```
-db/migrations/           SQL versionado (0001-0006 son la base: NO se editan)
+db/migrations/           SQL versionado (las ya aplicadas en producción NO se editan: agrega una nueva)
 src/lib/                 núcleo compartido (NO se edita desde un módulo)
 src/components/          ui.tsx, shell.tsx, meta.tsx, icons.tsx (NO se editan desde un módulo)
 src/modules/<módulo>/    componentes y lógica de cada módulo
 src/app/api/...          rutas de la API
-src/app/(app)/...        pantallas (las de (owner)/ son solo del dueño)
+src/app/(app)/...        pantallas: (owner)/ solo dueño · (front)/ dueño y recepción · (clinical)/ dueño y fisioterapeuta
 tests/api, tests/db, tests/unit
 bridge/                  agente puente del lector Hikvision (Node puro, sin dependencias)
 ```
@@ -39,7 +42,11 @@ Si necesitas un cambio de esquema, agrega una migración NUEVA con el prefijo nu
 El esquema completo ya existe. **Léelo antes de escribir**: `db/migrations/0001..0006`.
 Reglas que ya viven en la base (no las dupliques, apóyate en ellas y muestra su mensaje):
 
-- RLS en todas las tablas; `can_access_patient(id)`, `is_owner()`, `app_uid()`.
+- RLS en todas las tablas; `can_access_patient(id)`, `is_owner()`, `is_reception()`, `is_front_desk()` (dueño o recepción), `app_uid()`.
+  `can_access_patient()` protege lo clínico y **no** incluye a recepción: una tabla clínica nueva se protege con ella
+  y queda cerrada para recepción sin hacer nada más. Lo administrativo que recepción deba ver lleva su propia política.
+- Recepción en `patients`: el trigger `patients_reception_guard` le impide cambiar fisioterapeuta, estado (baja /
+  reactivación), motivo de consulta y etiquetas.
 - `patient_billing` (vista): plan vigente y estado calculado `pagado | por_vencer | vencido | pausado | sin_plan`.
 - Notas de evolución, consentimientos, renglones de documento y bitácora: inmutables.
 - Documentos: el trigger fija emisor, datos legales y folio; receta médica solo para `is_physician` con cédula.
@@ -90,6 +97,10 @@ export const POST = route({ auth: 'user', body: Body }, async ({ db, user, param
 ```
 
 - `auth: 'owner'` para lo exclusivo del dueño (responde 403 a un fisioterapeuta). `auth: 'public'` solo para webhooks/tokens.
+- `auth: 'front'` para el mostrador (dueño o recepción): cobranza, links de pago, tablero de mensualidades.
+- `auth: 'clinical'` para **toda** ruta que lea o escriba información clínica (dueño o fisioterapeuta): responde 403 a
+  recepción aunque RLS ya no le entregue filas. `auth: 'user'` queda para lo que usan los tres roles; si ahí cambia algo
+  por rol, usa `isFrontDesk(user)` de `src/lib/api.ts` y decide explícitamente qué recibe recepción.
 - Errores: `throw badRequest('mensaje', { campo: 'mensaje' })`, `notFound()`, `forbidden()`, `conflict()`. Mensajes en español, listos para mostrarse.
 - Devuelve un `Response` para PDF/descargas (`pdfResponse` de `src/lib/pdf.ts`).
 - Validación con zod 4: `z.uuid()`, `z.string().trim().min(1, 'msg')`, `z.enum([...])`, `z.coerce.number()`. Fechas: `z.string().regex(/^\d{4}-\d{2}-\d{2}$/)`.
@@ -105,6 +116,8 @@ export const POST = route({ auth: 'user', body: Body }, async ({ db, user, param
 - Formularios en hojas (`<Sheet>`), como el mockup. Errores por campo desde `ApiError.fields`. Botón principal con `loading`.
 - Tres estados siempre: cargando (`Skeleton`), vacío (`Empty` con texto útil) y error (`ErrorNote` con reintento).
 - Catálogos para selectores: `useMeta()` y `PatientPicker` de `@/components/meta`.
+- Rol en pantalla: `useUser()` da `isOwner`, `isReception`, `isFront` (dueño o recepción) e `isClinical` (dueño o
+  fisioterapeuta). No montes componentes clínicos para recepción: sus lecturas responderían 403.
 - Fechas y dinero: `src/lib/dates.ts` (`fmtDate, fmtTime, dayLabel, todayIso, ageFrom, localToInstant…`) y `src/lib/format.ts` (`money, initials, shortName…`). Nunca `new Date().toLocaleDateString()` suelto. Formato visible: DD/MM/AAAA, 24 h, MXN.
 - Debe funcionar igual a 390 px y a 1440 px, completarse con teclado y no desbordar texto (`ellipsis`, `flex-wrap`).
 - Sin emojis. Sin textos de relleno. Sin "demo".
@@ -137,11 +150,12 @@ pnpm -s typecheck                               # debe quedar sin errores en TUS
 ```
 
 - Escribe pruebas de API en `tests/api/<módulo>.test.ts` usando `fixtures()` y `call()` de `tests/helpers.ts`:
-  camino feliz, validación, y **permisos por rol** (el fisioterapeuta A no ve ni toca lo del paciente de B; lo de dueño devuelve 403).
+  camino feliz, validación, y **permisos por rol** (el fisioterapeuta A no ve ni toca lo del paciente de B; lo de dueño devuelve 403;
+  lo clínico devuelve 403 a recepción: `fx.reception`).
 - Hay un servidor de desarrollo corriendo en `http://localhost:3000` con la base de demostración
-  (dueño `nicolas.h`, fisioterapeutas `k.ocampo`, `m.reyes` (médico), `d.salinas`, `a.pineda`; contraseña `Elite2026demo`).
+  (dueño `nicolas.h`, fisioterapeutas `k.ocampo`, `m.reyes` (médico), `d.salinas`, `a.pineda`, recepción `r.morales`; contraseña `Elite2026demo`).
   **No lo reinicies, no corras `next build` ni `next dev`.** Recarga solo.
-- Revisa tus pantallas con capturas y **míralas** (herramienta Read) en escritorio y móvil, como dueño y como fisioterapeuta:
+- Revisa tus pantallas con capturas y **míralas** (herramienta Read) en escritorio y móvil, como dueño, como fisioterapeuta y como recepción:
   `node scripts/dev/shot.mjs nicolas.h Elite2026demo <carpeta_en_tu_scratch> /ruta@1440 /ruta@390`
   Corrige lo que se vea roto o distinto al mockup antes de terminar.
 - No reinicies ni resiembres la base `nce_dev` (la comparten todos). Puedes crear datos desde la interfaz.

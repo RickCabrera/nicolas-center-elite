@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Badge, Button, Checkbox, Confirm, KV, Notice, Sheet, useToast } from '@/components/ui';
+import { useUser } from '@/components/user-context';
 import { api, ApiError, refresh } from '@/lib/client';
 import { fmtDateTime, fmtTime, longDate, todayIso } from '@/lib/dates';
 import { APPT_STATUS_LABEL } from '@/lib/format';
@@ -16,6 +17,7 @@ type Mode = 'detail' | 'edit' | 'cancel' | 'note';
  * abrir expediente y escribir la nota de evolución ligada a la cita.
  */
 export function AppointmentSheet({ appointment: a, onClose, onMoved }: { appointment: Appointment | null; onClose: () => void; onMoved?: (date: string) => void }) {
+  const user = useUser();
   const toast = useToast();
   const [mode, setMode] = useState<Mode>('detail');
   const [busy, setBusy] = useState('');
@@ -84,10 +86,11 @@ export function AppointmentSheet({ appointment: a, onClose, onMoved }: { appoint
           {(a.status === 'attended' || a.status === 'no_show') && (
             <Button block loading={busy === 'scheduled'} onClick={() => mark('scheduled')}>Deshacer: volver a programada</Button>
           )}
-          {a.status !== 'cancelled' && (
+          {/* AUTH-10 · La nota de evolución es clínica: recepción gestiona la cita, no la escribe. */}
+          {a.status !== 'cancelled' && user.isClinical && (
             <Button block variant="primary" onClick={() => setMode('note')}>{a.has_note ? 'Escribir otra nota de evolución' : 'Escribir nota de evolución'}</Button>
           )}
-          <Link href={`/pacientes/${a.patient_id}`} className="btn block">Abrir expediente</Link>
+          <Link href={`/pacientes/${a.patient_id}`} className="btn block">{user.isClinical ? 'Abrir expediente' : 'Abrir ficha del paciente'}</Link>
           {scheduled && (
             <div className="hstack wrap">
               <Button style={{ flex: '1 1 180px' }} onClick={() => setMode('edit')}>Reprogramar / editar</Button>
@@ -109,8 +112,8 @@ export function AppointmentSheet({ appointment: a, onClose, onMoved }: { appoint
         } />
 
       {/* AGE-09 · La nota queda ligada a la cita; al guardar, la lista se refresca y muestra "Nota registrada". */}
-      <NoteSheet open={mode === 'note'} onClose={() => setMode('detail')} patientId={a.patient_id} appointmentId={a.id}
-        onSaved={() => { void refresh('/api/appointments'); setMode('detail'); }} />
+      {user.isClinical && <NoteSheet open={mode === 'note'} onClose={() => setMode('detail')} patientId={a.patient_id} appointmentId={a.id}
+        onSaved={() => { void refresh('/api/appointments'); setMode('detail'); }} />}
     </>
   );
 }

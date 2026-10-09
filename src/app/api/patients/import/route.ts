@@ -12,10 +12,11 @@ const Body = z.object({
   skip_invalid: z.boolean().default(false),
 });
 
-// PAC-09 · Importador CSV (solo dueño). Sin `commit` devuelve la vista previa; con `commit` inserta
+// PAC-09 · Importador CSV (dueño o recepción). Sin `commit` devuelve la vista previa; con `commit` inserta
 // todas las filas válidas en esta misma transacción: o entran todas o no entra ninguna.
-export const POST = route({ auth: 'owner', body: Body }, async ({ db, user, body }) => {
-  const { rows, valid, invalid } = await analyzeImport(db, body.csv);
+// AUTH-10 · Desde recepción las columnas clínicas (motivo, etiquetas) no se importan: salen vacías en la vista previa.
+export const POST = route({ auth: 'front', body: Body }, async ({ db, user, body }) => {
+  const { rows, valid, invalid } = await analyzeImport(db, body.csv, { clinical: user.role !== 'reception' });
   const preview = rows.map(({ line, ok, errors, data }) => ({ line, ok, errors, data }));
   if (!body.commit) return { rows: preview, valid, invalid };
 

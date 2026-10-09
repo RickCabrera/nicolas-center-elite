@@ -10,7 +10,7 @@ const Body = z.object({
 });
 
 // EXP-03 · Edita nombre o dosis, o quita el ejercicio del plan (`active: false`). Nunca se borra.
-export const PATCH = route({ auth: 'user', body: Body }, async ({ db, params, body }) => {
+export const PATCH = route({ auth: 'clinical', body: Body }, async ({ db, params, body }) => {
   const patient = await requirePatient(db, params.id);
   if (!isUuid(params.exerciseId)) throw notFound('Ejercicio no encontrado.');
   if (body.name === undefined && body.dosage === undefined && body.active === undefined) throw badRequest('No hay cambios que guardar.');

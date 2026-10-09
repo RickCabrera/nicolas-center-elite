@@ -7,6 +7,12 @@ https://claude.ai/code/artifact/4ef710f8-9420-4c7a-9fb9-e616d0b93152
 Los IDs de tarea (INF-01, PAC-03, HUE-07…) se citan en comentarios del código y en los nombres de las pruebas.
 La matriz de qué archivo y qué prueba cubre cada tarea está en `docs/trazabilidad.md`.
 
+## Ampliación aprobada después del backlog: perfil de Recepción
+
+| ID | Tarea | Terminado cuando |
+| --- | --- | --- |
+| AUTH-10 | Rol "Recepción" (`reception`) | Quien atiende el mostrador opera lo administrativo de todos los pacientes de todas las sedes (alta y datos de contacto, firmas del alta, agenda de todos los fisioterapeutas, mensualidades y cobro en línea, asistencia y huella de pacientes) y nunca ve información clínica: las rutas clínicas le responden 403 y RLS no le entrega filas. Anular pagos, reembolsos, facturación, ingresos, Equipo, Configuración y auditoría siguen siendo del dueño. El dueño invita y desactiva cuentas de recepción desde Equipo |
+
 ## Ampliación aprobada después del backlog: cobro en línea y facturación
 
 | ID | Tarea | Terminado cuando |

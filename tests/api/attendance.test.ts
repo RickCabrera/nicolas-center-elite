@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { call, sqlSystem, TEST_PASSWORD, type Fixtures, type TestUser } from '../helpers';
+import { call, resetData, sqlSystem, TEST_PASSWORD, type CoreFixtures as Fixtures, type TestUser } from '../helpers';
 import { hashPassword } from '@/lib/auth/password';
 import { createSession } from '@/lib/auth/session';
 import { addDays, localToInstant, todayIso } from '@/lib/dates';
@@ -33,6 +33,9 @@ const fixtureIndex = JSON.parse(readFileSync(join(FIX, 'index.json'), 'utf8')) a
  * local la transacción completa falla. TRUNCATE no dispara triggers por fila, así que no hace falta.
  */
 async function fixtures(): Promise<Fixtures> {
+  // Parte de los datos base: otra prueba pudo renombrar un plan o cambiar el domicilio de una sede,
+  // y el orden en que corren los archivos no está garantizado.
+  await resetData();
   const hash = await hashPassword(TEST_PASSWORD);
   return sqlSystem(async (tx) => {
     await tx.unsafe(`truncate audit_log, attendance_events, enrollments, device_commands, devices, payments, memberships,

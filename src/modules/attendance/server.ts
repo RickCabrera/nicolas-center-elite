@@ -319,7 +319,7 @@ export type Person = {
 
 /**
  * Carga a la persona validando el permiso: paciente vía RLS (si no es suyo, no existe);
- * personal solo el dueño o el propio usuario.
+ * personal solo el dueño o el propio usuario (recepción administra la huella de pacientes, no la del equipo).
  */
 export async function loadPerson(db: Tx, user: { id: string; role: string }, personType: 'patient' | 'staff', personId: string): Promise<Person> {
   if (personType === 'patient') {
@@ -405,7 +405,7 @@ export const attendanceSelect = (db: Tx) => db`
          coalesce(nullif(e.person_name, ''), 'Sin nombre') as person_name,
          case e.person_type
            when 'patient' then 'Paciente'
-           when 'staff' then case when u.role = 'owner' then 'Dirección' else 'Fisioterapeuta' end
+           when 'staff' then case u.role when 'owner' then 'Dirección' when 'reception' then 'Recepción' else 'Fisioterapeuta' end
            else 'No reconocido' end as role_label,
          e.location_id, l.name as location_name, e.occurred_at, e.direction, e.source, e.verify_mode,
          e.manual_reason, nullif(trim(coalesce(rb.title, '') || ' ' || coalesce(rb.full_name, '')), '') as recorded_by_name,

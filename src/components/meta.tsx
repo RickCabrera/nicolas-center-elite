@@ -6,6 +6,8 @@ export type Meta = {
   clinic: { name: string; legal_name: string | null; tagline: string | null; phone: string | null; email: string | null; settings: Record<string, unknown> };
   locations: { id: string; code: string; name: string; street: string; neighborhood: string; city: string; state: string; zip: string; phone: string; hours: string; active: boolean }[];
   therapists: { id: string; full_name: string; title: string; display_name: string; specialty: string; location_id: string | null; location_name: string | null; is_physician: boolean; role: string; active: boolean }[];
+  /** AUTH-10 · Personal de recepción: no recibe pacientes ni citas; solo aparece donde se elige "personal". */
+  reception: { id: string; full_name: string; title: string; display_name: string; location_id: string | null; location_name: string | null; active: boolean }[];
   plans: { id: string; name: string; kind: 'monthly' | 'package' | 'single'; price_cents: number; period_days: number; sessions_count: number | null; active: boolean; position: number }[];
   session_types: { id: string; name: string; default_duration_min: number; active: boolean; position: number }[];
   study_types: { name: string; active: boolean; position: number }[];

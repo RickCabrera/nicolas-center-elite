@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { route } from '@/lib/api';
+import { isFrontDesk, route } from '@/lib/api';
 import { notFound } from '@/lib/errors';
 import { assignPlan, billingOf, changePlan, pauseMembership, requirePatient, resumeMembership } from '@/modules/billing/server';
 
@@ -12,7 +12,7 @@ async function detail(db: Parameters<typeof billingOf>[0], patientId: string, ow
     where m.patient_id = ${patientId} and m.status = 'ended'
     order by m.ended_on desc nulls last, m.created_at desc`;
   const out: Record<string, unknown> = { patient, membership: b?.membership_id ? b : null, state: b?.state ?? 'sin_plan', history };
-  // Los pagos (montos, métodos) son solo del dueño; RLS tampoco se los entrega al fisioterapeuta.
+  // Los pagos (montos, métodos) son del dueño y de recepción; RLS tampoco se los entrega al fisioterapeuta.
   if (owner) {
     const [contact] = await db<{ phone: string | null }[]>`select phone from patients where id = ${patientId}`;
     out.patient = { ...patient, phone: contact?.phone ?? null };
@@ -39,7 +39,7 @@ const validId = (id: string) => { if (!z.uuid().safeParse(id).success) throw not
 // PAG-02 · Membresía del paciente. El fisioterapeuta solo lee plan y estado de SUS pacientes (sin pagos).
 export const GET = route({ auth: 'user' }, async ({ db, user, params }) => {
   validId(params.patientId);
-  return detail(db, params.patientId, user.role === 'owner');
+  return detail(db, params.patientId, isFrontDesk(user));
 });
 
 const Body = z.discriminatedUnion('action', [
@@ -49,8 +49,8 @@ const Body = z.discriminatedUnion('action', [
   z.object({ action: z.literal('resume') }),
 ]);
 
-// PAG-02 / PAG-09 · Asignar plan, cambiar de plan, pausar y reanudar (solo dueño).
-export const PATCH = route({ auth: 'owner', body: Body }, async ({ db, user, params, body }) => {
+// PAG-02 / PAG-09 · Asignar plan, cambiar de plan, pausar y reanudar (dueño o recepción).
+export const PATCH = route({ auth: 'front', body: Body }, async ({ db, user, params, body }) => {
   validId(params.patientId);
   await requirePatient(db, params.patientId);
   if (body.action === 'assign') await assignPlan(db, user, params.patientId, body.plan_id);

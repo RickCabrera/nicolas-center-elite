@@ -2,12 +2,13 @@
 
 Sistema clínico del centro de fisioterapia y readaptación deportiva Nicolas Center Elite (Córdoba y Orizaba, Ver.):
 pacientes y expediente clínico, agenda, indicaciones y recetas, estudios, mensualidades con cobro en línea (tarjeta
-y OXXO) y facturación CFDI 4.0, asistencia con el lector de huella Hikvision, equipo y configuración. Dos roles: dueño y fisioterapeuta.
+y OXXO) y facturación CFDI 4.0, asistencia con el lector de huella Hikvision, equipo y configuración. Tres roles: dueño,
+fisioterapeuta y recepción (administrativo, sin acceso a información clínica).
 
 | Documento | Para qué |
 | --- | --- |
 | [docs/despliegue.md](docs/despliegue.md) | Poner la app en línea: cada servicio y cada variable, paso a paso |
-| [docs/manual.md](docs/manual.md) | Manual de uso para dueño y fisioterapeutas |
+| [docs/manual.md](docs/manual.md) | Manual de uso para dueño, fisioterapeutas y recepción |
 | [bridge/README.md](bridge/README.md) | Instalar el agente del lector en la PC de recepción |
 | [docs/cumplimiento.md](docs/cumplimiento.md) | NOM-004, NOM-024, art. 28 Bis LGS y LFPDPPP, con la prueba de cada control |
 | [docs/revision-legal.pdf](docs/revision-legal.pdf) | Paquete para el abogado o responsable sanitario |
@@ -29,12 +30,13 @@ Requisitos: Node 20+, pnpm 10, PostgreSQL 16.
 ```
 pnpm install
 cp .env.example .env.local          # ajusta DATABASE_URL a tu Postgres
-pnpm db:reset && pnpm db:seed       # base de demostración (11 pacientes, 4 fisioterapeutas)
+pnpm db:reset && pnpm db:seed       # base de demostración (11 pacientes, 4 fisioterapeutas, 1 recepción)
 pnpm dev                            # http://localhost:3000
 ```
 
 Usuarios de demostración (contraseña `Elite2026demo`): `nicolas.h` (dueño), `m.reyes` (médico, puede recetar),
-`k.ocampo`, `d.salinas`, `a.pineda`. Con una base vacía, `/setup` crea la cuenta del dueño.
+`k.ocampo`, `d.salinas`, `a.pineda` (fisioterapeutas) y `r.morales` (recepción). Con una base vacía, `/setup` crea
+la cuenta del dueño.
 
 ## Comandos
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMeta } from '@/components/meta';
 import { PageHeader } from '@/components/shell';
 import { BillingBadge, Button, Chip, Empty, ErrorNote, Input, Skeleton, Tabs } from '@/components/ui';
+import { useUser } from '@/components/user-context';
 import { qs, useApi } from '@/lib/client';
 import { fmtDate } from '@/lib/dates';
 import { money, type BillingState } from '@/lib/format';
@@ -142,12 +143,16 @@ const TAB_SUB: Record<TabKey, string> = {
   ingresos: 'Ingresos por mes, sede y plan',
 };
 
-// PAG-06 / PAG-10 / PAG-12 / FAC-06 · Mensualidades: estado de pago, cobros en línea, facturas e ingresos (solo dueño).
+// PAG-06 / PAG-10 / PAG-12 / FAC-06 · Mensualidades: estado de pago, cobros en línea, facturas e ingresos.
+// AUTH-10 · Recepción ve solo "Estado de pago" y "Cobros en línea"; Facturas e Ingresos son del dueño.
 export default function Mensualidades() {
+  const user = useUser();
+  const allowed = (t: string | null): t is TabKey => !!t && t in TAB_SUB && (user.isOwner || t === 'estado' || t === 'linea');
   const [tab, setTab] = useState<TabKey>('estado');
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get('tab');
-    if (t && t in TAB_SUB) setTab(t as TabKey);
+    if (allowed(t)) setTab(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const { data: links } = useApi<{ counts: Record<string, number> }>('/api/billing/payment-links?limit=1');
   const review = links?.counts.needs_review ?? 0;
@@ -157,13 +162,12 @@ export default function Mensualidades() {
       <Tabs tabs={[
         { key: 'estado', label: 'Estado de pago' },
         { key: 'linea', label: review ? `Cobros en línea (${review})` : 'Cobros en línea' },
-        { key: 'facturas', label: 'Facturas' },
-        { key: 'ingresos', label: 'Ingresos' },
+        ...(user.isOwner ? [{ key: 'facturas' as const, label: 'Facturas' }, { key: 'ingresos' as const, label: 'Ingresos' }] : []),
       ]} value={tab} onChange={setTab} />
       {tab === 'estado' && <BoardView />}
       {tab === 'linea' && <OnlineLinks />}
-      {tab === 'facturas' && <InvoicesTab />}
-      {tab === 'ingresos' && <IncomeReport />}
+      {tab === 'facturas' && user.isOwner && <InvoicesTab />}
+      {tab === 'ingresos' && user.isOwner && <IncomeReport />}
     </div>
   );
 }

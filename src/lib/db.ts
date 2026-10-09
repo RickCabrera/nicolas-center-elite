@@ -5,7 +5,8 @@ import { env } from './env';
  * Acceso a datos. Hay exactamente dos modos:
  *
  *  · asUser(user, fn)  → consultas a nombre de un usuario. Corre con el rol `nce_app`, por lo que
- *                        TODA política RLS aplica (el fisioterapeuta solo ve a sus pacientes).
+ *                        TODA política RLS aplica (el fisioterapeuta solo ve a sus pacientes; recepción
+ *                        ve lo administrativo de todos y nada clínico).
  *  · asSystem(fn)      → consultas del sistema (autenticación, webhooks, tareas programadas).
  *                        No pasa por RLS: úsalo solo cuando el código ya validó el permiso.
  *
@@ -14,7 +15,9 @@ import { env } from './env';
  */
 export type Sql = postgres.Sql<Record<string, never>>;
 export type Tx = postgres.TransactionSql<Record<string, never>>;
-export type Identity = { id: string; role: 'owner' | 'therapist' };
+/** AUTH-10 · Roles: dueño, fisioterapeuta y recepción (administrativo, sin acceso clínico). */
+export type Role = 'owner' | 'therapist' | 'reception';
+export type Identity = { id: string; role: Role };
 
 const g = globalThis as unknown as { __nce_sql?: Sql };
 

@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, normalize, resolve, sep } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import { env } from '../env';
 import { hmac, safeEqual } from '../crypto';
 
@@ -32,9 +32,11 @@ export function mimeForFile(name: string, declared?: string): string | null {
   return null;
 }
 
+// Las rutas del almacenamiento son claves con «/» (iguales en Supabase y en disco): se normalizan como POSIX.
+// Con el `normalize` nativo, en Windows las «/» se volvían «\» y toda ruta válida se rechazaba.
 const safePath = (p: string) => {
-  const n = normalize(p).replace(/^([/\\])+/, '');
-  if (n.startsWith('..') || n.includes(`..${sep}`) || !/^[\w./-]+$/.test(n)) throw new Error('Ruta de archivo inválida.');
+  const n = posix.normalize(p).replace(/^([/\\])+/, '');
+  if (n.startsWith('..') || n.includes('../') ||!/^[\w./-]+$/.test(n)) throw new Error('Ruta de archivo inválida.');
   return n;
 };
 
