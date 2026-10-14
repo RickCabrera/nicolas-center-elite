@@ -13,6 +13,7 @@ import { createSession, SESSION_COOKIE } from '@/lib/auth/session';
  *   expect(r.status).toBe(200); expect(r.data).toHaveLength(2);
  */
 const DATA_TABLES = [
+  'job_runs',
   'audit_log', 'attendance_events', 'enrollments', 'device_commands', 'devices',
   'invoice_payments', 'invoices', 'payment_links', 'provider_events', 'patient_tax_profiles', 'payments', 'memberships',
   'document_items', 'documents', 'folio_counters', 'time_blocks', 'therapist_hours', 'appointments', 'studies', 'consents',

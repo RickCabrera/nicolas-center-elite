@@ -7,7 +7,8 @@ fisioterapeuta y recepción (administrativo, sin acceso a información clínica)
 
 | Documento | Para qué |
 | --- | --- |
-| [docs/despliegue.md](docs/despliegue.md) | Poner la app en línea: cada servicio y cada variable, paso a paso |
+| [docs/despliegue-railway.md](docs/despliegue-railway.md) | Poner la app en línea en Railway (app, base y archivos juntos) |
+| [docs/despliegue.md](docs/despliegue.md) | Alternativa con Vercel + Supabase: cada servicio y cada variable, paso a paso |
 | [docs/manual.md](docs/manual.md) | Manual de uso para dueño, fisioterapeutas y recepción |
 | [bridge/README.md](bridge/README.md) | Instalar el agente del lector en la PC de recepción |
 | [docs/cumplimiento.md](docs/cumplimiento.md) | NOM-004, NOM-024, art. 28 Bis LGS y LFPDPPP, con la prueba de cada control |

@@ -2,8 +2,7 @@ import { route } from '@/lib/api';
 import { safeEqual } from '@/lib/crypto';
 import { env } from '@/lib/env';
 import { AppError, unauthorized } from '@/lib/errors';
-import { expireStaleLinks } from '@/modules/billing/online';
-import { syncPendingCancellations } from '@/modules/invoicing/server';
+import { runDaily } from '@/modules/maintenance/daily';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,8 +19,5 @@ export const GET = route({ auth: 'public' }, async ({ req, db }) => {
   const header = req.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token || !safeEqual(token, secret)) throw unauthorized('Token de la tarea programada inválido.');
-  const [row] = await db<{ result: Record<string, number> }[]>`select daily_housekeeping() as result`;
-  const expired_payment_links = await expireStaleLinks(db);
-  const invoices = await syncPendingCancellations(db);
-  return { ...row.result, expired_payment_links, invoice_cancellations_checked: invoices.checked, invoices_canceled: invoices.canceled, ran_at: new Date().toISOString() };
+  return runDaily(db);
 });

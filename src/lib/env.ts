@@ -18,6 +18,8 @@ const schema = z.object({
   RESEND_API_KEY: z.string().optional().default(''),
   EMAIL_FROM: z.string().default('Nicolas Center Elite <no-reply@example.com>'),
   ENABLE_SIMULATOR: z.string().optional().default('false'),
+  // Servidor siempre encendido (Railway, VPS): la tarea diaria la corre un reloj interno en lugar de Vercel Cron.
+  INTERNAL_CRON: z.string().optional().default('false'),
   // Cobro en línea (Stripe) y facturación (Facturapi). Opcionales: sin llave, la función se muestra desactivada.
   STRIPE_SECRET_KEY: z.string().optional().default(''),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default(''),
@@ -44,8 +46,13 @@ export function env(): Env {
     if (!e.SUPABASE_SERVICE_ROLE_KEY) problems.push('SUPABASE_SERVICE_ROLE_KEY: llave de servicio del proyecto.');
   }
   if (e.APP_ENV === 'production') {
-    if (e.STORAGE_DRIVER !== 'supabase') problems.push('STORAGE_DRIVER: en producción debe ser "supabase".');
-    if (!e.CRON_SECRET) problems.push('CRON_SECRET: secreto de la tarea programada diaria.');
+    // Disco local en producción solo sobre un volumen persistente (ruta absoluta, p. ej. /data/storage en Railway).
+    if (e.STORAGE_DRIVER === 'local' && !e.LOCAL_STORAGE_DIR.startsWith('/')) {
+      problems.push('LOCAL_STORAGE_DIR: en producción con STORAGE_DRIVER=local debe ser la ruta absoluta de un volumen persistente (por ejemplo /data/storage).');
+    }
+    if (!e.CRON_SECRET && e.INTERNAL_CRON !== 'true') {
+      problems.push('CRON_SECRET: secreto de la tarea programada diaria (o INTERNAL_CRON=true en un servidor siempre encendido).');
+    }
   }
   if (problems.length) {
     throw new Error(`Configuración incompleta. Revisa estas variables de entorno:\n${problems.map((p) => `  · ${p}`).join('\n')}`);

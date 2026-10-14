@@ -1,5 +1,8 @@
 # Despliegue a producción
 
+> **Opción más económica para una sola clínica: Railway** (app, base y archivos en un solo lugar). Ver
+> [`docs/despliegue-railway.md`](despliegue-railway.md). Esta guía describe la opción Vercel + Supabase.
+
 Todo el código está listo. Lo único manual es crear las cuentas de los servicios, pegar las variables y
 configurar el lector. Esta guía es la base del prompt para Claude in Chrome (DEP-05).
 
