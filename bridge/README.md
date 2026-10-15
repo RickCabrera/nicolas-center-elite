@@ -108,6 +108,10 @@ internet.
    powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
    ```
 6. En la app, **Configuración → Lectores** debe mostrar "Agente puente conectado". Pulsa **Probar conexión**.
+7. En el lector, apaga la pregunta "1 entrada / 2 salida" para que la gente solo ponga el dedo o la cara y pase:
+   página web del lector → **Configuration → Time and Attendance → Attendance Mode → Disable** (o en la pantalla:
+   *Menú → T&A Status → Modo → Desactivado*). La app decide entrada/salida sola: para el personal, cada lectura
+   es lo contrario de la anterior del día; para pacientes, cada lectura es una asistencia.
 
 Para desinstalar: `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 -Uninstall`.
 

@@ -354,6 +354,23 @@ describe('HUE-09 · entrada/salida', () => {
     expect(ev[0]).toMatchObject({ person_type: 'staff', person_name: 'L.F.T. Karla Ocampo' });
   });
 
+  it('se cura solo: dos entradas seguidas (parámetro apagado a media jornada) y la siguiente lectura es salida', async () => {
+    const no = emp[fx.therapistA.id];
+    const d = addDays(todayIso(), -3);
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('08:00', d) }), 'application/json');
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('12:00', d) }), 'application/json'); // salida
+    // Con el parámetro apagado toda lectura es entrada…
+    await sqlSystem((tx) => tx`update clinic set settings = settings || '{"staff_alternate_in_out": false}'::jsonb`);
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('13:00', d) }), 'application/json');
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('14:00', d) }), 'application/json');
+    // …y al encenderlo otra vez, la siguiente es lo contrario de la última (salida), no un conteo par/impar.
+    await sqlSystem((tx) => tx`update clinic set settings = settings || '{"staff_alternate_in_out": true}'::jsonb`);
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('15:00', d) }), 'application/json');
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('16:00', d) }), 'application/json');
+    const ev = await events(`where user_id = '${fx.therapistA.id}' and mx_date(occurred_at) = '${d}'`);
+    expect(ev.map((e) => e.direction)).toEqual(['in', 'out', 'in', 'in', 'out', 'in']);
+  });
+
   it('paciente: siempre entrada por defecto', async () => {
     const no = emp[fx.patientA1];
     await hook(dev.webhook, accessJson({ employeeNo: no, time: at('09:00', day) }), 'application/json');
