@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { route, type RouteCtx } from '@/lib/api';
 import { conflict } from '@/lib/errors';
-import { asciiName, enqueueCommand, listDevices, loadPerson, pickDevice, queuePersonRemoval } from '@/modules/attendance/server';
+import { asciiName, enqueueCommand, listDevices, loadPerson, pickDevice, queuePersonRemoval, type CommandKind } from '@/modules/attendance/server';
 
 const PersonRef = z.object({
   person_type: z.enum(['patient', 'staff']),
@@ -10,6 +10,8 @@ const PersonRef = z.object({
 const Body = PersonRef.extend({
   device_id: z.uuid().optional(),
   action: z.enum(['enroll', 'remove']).default('enroll'),
+  /** Qué se registra en el lector: la huella (por defecto) o el rostro. */
+  method: z.enum(['fingerprint', 'face']).default('fingerprint'),
 });
 
 // HUE-07 · Estado de la huella de una persona: si ya está registrada, en qué lector y si falta el consentimiento.
@@ -23,11 +25,12 @@ export const GET = route({ auth: 'user', query: PersonRef }, async ({ db, user, 
   return system(async (tx) => {
     const device = await pickDevice(tx, person);
     const who = person.type === 'patient' ? tx`e.patient_id = ${person.id}` : tx`e.user_id = ${person.id}`;
-    const enrollments = await tx`
-      select e.device_id, d.name as device_name, e.status, e.enrolled_at
+    const enrollments = await tx<{ device_id: string; device_name: string; status: string; enrolled_at: Date | null; face_enrolled_at: Date | null }[]>`
+      select e.device_id, d.name as device_name, e.status, e.enrolled_at, e.face_enrolled_at
       from enrollments e join devices d on d.id = e.device_id where ${who} and e.status <> 'removed' order by e.created_at`;
+    const face_enrolled_at = enrollments.filter((e) => e.status === 'enrolled' && e.face_enrolled_at).map((e) => e.face_enrolled_at as Date).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
     return {
-      person_type: person.type, person_id: person.id, enrolled_at: person.enrolled_at, has_consent,
+      person_type: person.type, person_id: person.id, enrolled_at: person.enrolled_at, face_enrolled_at, has_consent,
       device: device ? { id: device.id, name: device.name, online: device.online, bridge_online: device.bridge_online } : null,
       enrollments,
     };
@@ -61,10 +64,11 @@ export const POST = route({ auth: 'user', body: Body }, async (ctx) => {
   if (!person.active) throw conflict(person.type === 'patient' ? 'El paciente está dado de baja.' : 'La persona está dada de baja.');
 
   if (person.type === 'patient') {
-    // La huella es un dato sensible: sin consentimiento firmado no se captura.
+    // La huella y el rostro son datos sensibles: sin consentimiento firmado no se capturan.
     const [c] = await db`select 1 from consents where patient_id = ${person.id} and kind = 'biometric' limit 1`;
-    if (!c) throw conflict('Falta firmar el consentimiento de huella.', 'consent_required');
+    if (!c) throw conflict('Falta firmar el consentimiento de datos biométricos.', 'consent_required');
   }
+  const kind: CommandKind = body.method === 'face' ? 'enroll_face' : 'enroll_fingerprint';
 
   return system(async (tx) => {
     const device = await pickDevice(tx, person, body.device_id);
@@ -76,7 +80,7 @@ export const POST = route({ auth: 'user', body: Body }, async (ctx) => {
     // Doble clic o reintento: se reutiliza la orden que ya está en curso.
     const [dup] = await tx<{ id: string }[]>`
       select id from device_commands
-      where device_id = ${device.id} and kind = 'enroll_fingerprint' and status in ('pending','running') and ${who}
+      where device_id = ${device.id} and kind = ${kind} and status in ('pending','running') and ${who}
       order by created_at desc limit 1`;
     if (dup) return { command_id: dup.id, device_id: device.id, device_name: device.name, bridge_online: device.bridge_online };
 
@@ -86,8 +90,8 @@ export const POST = route({ auth: 'user', body: Body }, async (ctx) => {
       on conflict (device_id, employee_no) do update
         set status = case when enrollments.status = 'enrolled' then 'enrolled' else 'pending' end, removed_at = null`;
     const command_id = await enqueueCommand(tx, {
-      deviceId: device.id, kind: 'enroll_fingerprint',
-      payload: { employee_no: person.employee_no, name: asciiName(person.name) || person.employee_no, finger_no: 1 },
+      deviceId: device.id, kind,
+      payload: { employee_no: person.employee_no, name: asciiName(person.name) || person.employee_no, ...(kind === 'enroll_fingerprint' ? { finger_no: 1 } : {}) },
       createdBy: user.id, personType: person.type, ...ref,
     });
     return { command_id, device_id: device.id, device_name: device.name, bridge_online: device.bridge_online };

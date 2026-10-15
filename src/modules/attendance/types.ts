@@ -14,6 +14,9 @@ export type DeviceSecrets = {
   bridge_token: string;
   bridge_config: { cloud_url: string; bridge_token: string };
   bridge_config_json: string;
+  /** config.json con todos los lectores activos de la sede (null si solo hay uno). */
+  bridge_config_multi_json: string | null;
+  multi_readers: string[];
 };
 
 export type ReaderStatus = {
@@ -41,9 +44,9 @@ export type CommandStatus = {
 };
 
 export type EnrollInfo = {
-  person_type: 'patient' | 'staff'; person_id: string; enrolled_at: string | null; has_consent: boolean;
+  person_type: 'patient' | 'staff'; person_id: string; enrolled_at: string | null; face_enrolled_at: string | null; has_consent: boolean;
   device: { id: string; name: string; online: boolean; bridge_online: boolean } | null;
-  enrollments: { device_id: string; device_name: string; status: 'pending' | 'enrolled' | 'failed'; enrolled_at: string | null }[];
+  enrollments: { device_id: string; device_name: string; status: 'pending' | 'enrolled' | 'failed'; enrolled_at: string | null; face_enrolled_at: string | null }[];
 };
 
 export type StaffReportRow = {

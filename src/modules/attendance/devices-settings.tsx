@@ -348,9 +348,9 @@ function SecretsSheet({ device, onClose, onConfigure }: { device: Device | null;
     }
   };
 
-  const download = () => {
-    if (!data) return;
-    const url = URL.createObjectURL(new Blob([data.bridge_config_json + '\n'], { type: 'application/json' }));
+  const download = (json = data?.bridge_config_json) => {
+    if (!json) return;
+    const url = URL.createObjectURL(new Blob([json + '\n'], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = 'config.json';
@@ -377,9 +377,21 @@ function SecretsSheet({ device, onClose, onConfigure }: { device: Device | null;
               <pre style={{ margin: 0, padding: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,.14)', background: 'rgba(0,0,0,.35)', font: '500 12.5px/1.5 var(--f-mono)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'all' }}>{data.bridge_config_json}</pre>
               <div className="hstack wrap">
                 <Button size="sm" variant="primary" onClick={async () => toast((await copyText(data.bridge_config_json)) ? 'config.json copiado' : 'No se pudo copiar; selecciónalo a mano')}>Copiar</Button>
-                <Button size="sm" onClick={download}>Descargar config.json</Button>
+                <Button size="sm" onClick={() => download()}>Descargar config.json</Button>
                 <Button size="sm" variant="danger" onClick={() => setRegen('bridge')}>Regenerar token</Button>
               </div>
+              {data.bridge_config_multi_json && (
+                <div className="notice stack sm" style={{ textAlign: 'left' }}>
+                  <div className="t-small">
+                    <b>Varios lectores en la misma PC.</b> Esta sede tiene {data.multi_readers.length} lectores activos ({data.multi_readers.join(', ')}).
+                    Si una sola PC de recepción los va a atender todos, usa este config.json en lugar del de arriba: el agente corre un ciclo por lector.
+                  </div>
+                  <div className="hstack wrap">
+                    <Button size="sm" onClick={() => download(data.bridge_config_multi_json ?? undefined)}>Descargar config.json con todos los lectores de la sede</Button>
+                    <Button size="sm" onClick={async () => toast((await copyText(data.bridge_config_multi_json ?? '')) ? 'config.json copiado' : 'No se pudo copiar')}>Copiar</Button>
+                  </div>
+                </div>
+              )}
             </section>
 
             <section className="stack md">

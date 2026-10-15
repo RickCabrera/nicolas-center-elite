@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { route } from '@/lib/api';
 import { notFound } from '@/lib/errors';
-import { translateDeviceError } from '@/modules/attendance/server';
+import { isEnrollKind, translateDeviceError } from '@/modules/attendance/server';
 
 type Row = {
   id: string; kind: string; status: 'pending' | 'running' | 'done' | 'error' | 'cancelled';
@@ -52,7 +52,7 @@ export const DELETE = route({ auth: 'user' }, async ({ params, user, system }) =
       update device_commands set status = 'cancelled', error = 'cancelled', finished_at = now()
       where id = ${c.id} and status = 'pending' returning kind, device_id, patient_id, user_id`;
     for (const r of rows) {
-      if (r.kind !== 'enroll_fingerprint') continue;
+      if (!isEnrollKind(r.kind)) continue;
       await tx`
         update enrollments set status = 'failed'
         where device_id = ${r.device_id} and status = 'pending'

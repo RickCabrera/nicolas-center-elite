@@ -66,8 +66,11 @@ export async function deviceByBridgeToken(tx: Tx, req: NextRequest): Promise<Aut
 
 // ───────── datos de conexión ─────────
 /** URL del webhook y valores exactos a capturar en el lector (Configuration → Network → HTTP Listening). */
-export function connectionData(webhookToken: string, bridgeToken: string) {
+export function connectionData(webhookToken: string, bridgeToken: string, others: { name: string; bridge_token: string }[] = [], ownName = '') {
   const base = env().APP_URL.replace(/\/+$/, '');
+  // Varios lectores atendidos por la misma PC: un solo config.json con la lista (el agente corre un ciclo por lector).
+  const readers = [{ name: ownName, bridge_token: bridgeToken }, ...others];
+  const multi = others.length ? { cloud_url: base, readers } : null;
   const u = new URL(base);
   const https = u.protocol === 'https:';
   const path = `${u.pathname.replace(/\/+$/, '')}/api/hik/events/${webhookToken}`;
@@ -83,6 +86,8 @@ export function connectionData(webhookToken: string, bridgeToken: string) {
     bridge_token: bridgeToken,
     bridge_config,
     bridge_config_json: JSON.stringify(bridge_config, null, 2),
+    bridge_config_multi_json: multi ? JSON.stringify(multi, null, 2) : null,
+    multi_readers: readers.map((r) => r.name),
   };
 }
 
@@ -120,7 +125,10 @@ export async function ingestEvents(tx: Tx, device: AuthDevice, events: HikEvent[
 }
 
 // ───────── cola de órdenes (HUE-06) ─────────
-export type CommandKind = 'ping' | 'sync_time' | 'upsert_person' | 'enroll_fingerprint' | 'delete_person' | 'backfill_events' | 'configure_listener' | 'list_persons';
+export type CommandKind = 'ping' | 'sync_time' | 'upsert_person' | 'enroll_fingerprint' | 'enroll_face' | 'delete_person' | 'backfill_events' | 'configure_listener' | 'list_persons';
+/** Órdenes que piden algo a la persona frente al lector (dedo o rostro): mismas reglas de caducidad. */
+export const ENROLL_KINDS: CommandKind[] = ['enroll_fingerprint', 'enroll_face'];
+export const isEnrollKind = (k: string): boolean => (ENROLL_KINDS as string[]).includes(k);
 
 export async function enqueueCommand(sys: Tx, c: {
   deviceId: string; kind: CommandKind; payload?: Record<string, unknown>; createdBy?: string | null;
@@ -148,15 +156,15 @@ export const MAX_ATTEMPTS = 3;
 export async function maintainQueue(sys: Tx, deviceId: string) {
   await sys`
     update device_commands set status = 'error', error = 'expired', finished_at = now()
-    where device_id = ${deviceId} and kind = 'enroll_fingerprint' and status = 'pending'
+    where device_id = ${deviceId} and kind = any(${ENROLL_KINDS}) and status = 'pending'
       and created_at < now() - make_interval(mins => ${ENROLL_TTL_MIN})`;
   const failed = await sys<{ id: string; kind: string; patient_id: string | null; user_id: string | null }[]>`
     update device_commands set status = 'error', error = 'no_response', finished_at = now()
     where device_id = ${deviceId} and status = 'running' and started_at < now() - interval '2 minutes'
-      and (kind = 'enroll_fingerprint' or coalesce((result ->> 'attempts')::int, 1) >= ${MAX_ATTEMPTS})
+      and (kind = any(${ENROLL_KINDS}) or coalesce((result ->> 'attempts')::int, 1) >= ${MAX_ATTEMPTS})
     returning id, kind, patient_id, user_id`;
   for (const f of failed) {
-    if (f.kind === 'enroll_fingerprint') await markEnrollmentFailed(sys, deviceId, f.patient_id, f.user_id);
+    if (isEnrollKind(f.kind)) await markEnrollmentFailed(sys, deviceId, f.patient_id, f.user_id);
   }
   await sys`
     update device_commands set status = 'pending', started_at = null
@@ -164,7 +172,7 @@ export async function maintainQueue(sys: Tx, deviceId: string) {
   await sys`
     update enrollments e set status = 'failed'
     where e.device_id = ${deviceId} and e.status = 'pending'
-      and not exists (select 1 from device_commands c where c.device_id = e.device_id and c.kind = 'enroll_fingerprint'
+      and not exists (select 1 from device_commands c where c.device_id = e.device_id and c.kind = any(${ENROLL_KINDS})
                        and c.status in ('pending','running')
                        and (c.patient_id = e.patient_id or c.user_id = e.user_id))`;
 }
@@ -217,22 +225,29 @@ export async function applyCommandResult(sys: Tx, cmd: CommandRow, ok: boolean, 
   const who = cmd.patient_id ? sys`patient_id = ${cmd.patient_id}` : sys`user_id = ${cmd.user_id}`;
   const hasPerson = !!(cmd.patient_id || cmd.user_id);
 
-  if (cmd.kind === 'enroll_fingerprint' && hasPerson) {
+  if (isEnrollKind(cmd.kind) && hasPerson) {
     if (ok) {
       const employeeNo = short(cmd.payload.employee_no, 64);
+      const face = cmd.kind === 'enroll_face';
+      // La persona queda dada de alta en el lector; por huella se marca `enrolled_at`, por rostro `face_enrolled_at`.
       await sys`
-        insert into enrollments (device_id, person_type, patient_id, user_id, employee_no, status, enrolled_at, removed_at)
-        values (${cmd.device_id}, ${cmd.person_type}, ${cmd.patient_id}, ${cmd.user_id}, ${employeeNo}, 'enrolled', now(), null)
-        on conflict (device_id, employee_no) do update set status = 'enrolled', enrolled_at = now(), removed_at = null`;
-      if (cmd.patient_id) await sys`update patients set fingerprint_enrolled_at = now() where id = ${cmd.patient_id}`;
-      else await sys`update users set fingerprint_enrolled_at = now() where id = ${cmd.user_id}`;
+        insert into enrollments (device_id, person_type, patient_id, user_id, employee_no, status, enrolled_at, face_enrolled_at, removed_at)
+        values (${cmd.device_id}, ${cmd.person_type}, ${cmd.patient_id}, ${cmd.user_id}, ${employeeNo}, 'enrolled',
+                ${face ? null : new Date()}, ${face ? new Date() : null}, null)
+        on conflict (device_id, employee_no) do update set status = 'enrolled', removed_at = null,
+          enrolled_at = case when ${face} then enrollments.enrolled_at else now() end,
+          face_enrolled_at = case when ${face} then now() else enrollments.face_enrolled_at end`;
+      if (!face) {
+        if (cmd.patient_id) await sys`update patients set fingerprint_enrolled_at = now() where id = ${cmd.patient_id}`;
+        else await sys`update users set fingerprint_enrolled_at = now() where id = ${cmd.user_id}`;
+      }
     } else {
       await markEnrollmentFailed(sys, cmd.device_id, cmd.patient_id, cmd.user_id);
     }
   }
 
   if (cmd.kind === 'delete_person' && ok && hasPerson) {
-    await sys`update enrollments set status = 'removed', removed_at = now() where device_id = ${cmd.device_id} and ${who}`;
+    await sys`update enrollments set status = 'removed', removed_at = now(), face_enrolled_at = null where device_id = ${cmd.device_id} and ${who}`;
     const [left] = await sys<{ n: number }[]>`select count(*)::int as n from enrollments where ${who} and status = 'enrolled'`;
     if (left.n === 0) {
       if (cmd.patient_id) await sys`update patients set fingerprint_enrolled_at = null where id = ${cmd.patient_id} and fingerprint_enrolled_at is not null`;
@@ -281,7 +296,12 @@ export const DEVICE_ERRORS: Record<string, string> = {
   device_busy: 'El lector está ocupado. Espera unos segundos e intenta de nuevo.',
   device_full: 'El lector ya no tiene espacio para más personas o huellas.',
   not_supported: 'El lector no admite esta operación con su firmware actual.',
-  device_enroll_timeout: 'No se registró ninguna huella en la pantalla del lector a tiempo. Intenta de nuevo.',
+  face_capture_failed: 'El lector no pudo capturar el rostro. La persona debe mirar de frente a la cámara; intenta de nuevo.',
+  face_low_quality: 'El lector no detectó bien el rostro. Acércate, mira de frente y sin cubrebocas, e intenta de nuevo.',
+  face_setup_failed: 'El lector capturó el rostro pero no pudo guardarlo. Intenta de nuevo.',
+  face_duplicate: 'Ese rostro ya está registrado a nombre de otra persona en el lector.',
+  face_query_failed: 'El lector no permitió consultar los rostros registrados.',
+  device_enroll_timeout: 'No se registró la huella o el rostro en la pantalla del lector a tiempo. Intenta de nuevo.',
   fingerprint_query_failed: 'El lector no permitió consultar las huellas registradas.',
   person_search_failed: 'El lector no entregó la lista de personas.',
   listener_not_supported: 'El lector no aceptó la configuración automática del aviso de eventos. Captúrala a mano con los "Datos de conexión".',
@@ -363,7 +383,7 @@ export async function queuePersonRemoval(
   const who = personType === 'patient' ? tx`patient_id = ${personId}` : tx`user_id = ${personId}`;
   // Un enrolamiento que aún no empieza ya no tiene sentido.
   await tx`update device_commands set status = 'cancelled', error = 'cancelled', finished_at = now()
-           where kind = 'enroll_fingerprint' and status = 'pending' and ${who}`;
+           where kind = any(${ENROLL_KINDS}) and status = 'pending' and ${who}`;
   const whoE = personType === 'patient' ? tx`e.patient_id = ${personId}` : tx`e.user_id = ${personId}`;
   const rows = await tx<{ device_id: string; employee_no: string; active: boolean }[]>`
     select e.device_id, e.employee_no, d.active from enrollments e join devices d on d.id = e.device_id

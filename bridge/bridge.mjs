@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // ───────────────────────── utilidades ─────────────────────────
@@ -89,6 +89,27 @@ export function xmlTag(xml, name) {
   return m ? m[1].trim() : null;
 }
 const xmlEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Imagen (JPEG) dentro de una respuesta multipart del lector; null si no trae una. */
+export function multipartImage(buffer, contentType) {
+  const m = /boundary="?([^";]+)"?/i.exec(String(contentType ?? ''));
+  if (!m || !buffer?.length) return null;
+  const delim = Buffer.from(`--${m[1]}`);
+  let pos = buffer.indexOf(delim);
+  while (pos !== -1) {
+    const headStart = pos + delim.length;
+    const headEnd = buffer.indexOf('\r\n\r\n', headStart);
+    if (headEnd === -1) break;
+    const next = buffer.indexOf(delim, headEnd);
+    const head = buffer.subarray(headStart, headEnd).toString('latin1');
+    let end = next === -1 ? buffer.length : next;
+    if (buffer[end - 2] === 13 && buffer[end - 1] === 10) end -= 2;
+    const part = buffer.subarray(headEnd + 4, end);
+    if (/image\/|filename=/i.test(head) && part.length > 2 && part[0] === 0xff && part[1] === 0xd8) return part;
+    pos = next;
+  }
+  return null;
+}
 
 function parseJson(text) {
   try { return JSON.parse(text); } catch { return null; }
@@ -168,7 +189,10 @@ export class HikDevice {
       const req = lib.request({ host: this.host, port: this.port, method, path: uri, headers, agent: this.agent, timeout: timeoutMs }, (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, text: buffer.toString('utf8'), buffer });
+        });
         res.on('error', (e) => reject(new BridgeError('device_unreachable', e.code || 'respuesta interrumpida')));
       });
       req.on('timeout', () => req.destroy(new BridgeError('device_timeout')));
@@ -274,27 +298,48 @@ export class HikDevice {
    * Quien llama es responsable de no conservarla (ver enrollFingerprint).
    */
   async captureFingerprint(fingerNo, timeoutMs) {
-    const xml = `<CaptureFingerPrintCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><fingerNo>${Number(fingerNo) || 1}</fingerNo></CaptureFingerPrintCond>`;
-    let r;
-    try {
-      r = await this.request('POST', '/ISAPI/AccessControl/CaptureFingerPrint', { body: xml, contentType: 'application/xml', timeoutMs });
-    } catch (e) {
-      if (e instanceof BridgeError && e.code === 'device_timeout') throw new BridgeError('capture_timeout');
-      throw e;
+    const no = Number(fingerNo) || 1;
+    // Cada firmware acepta un formato distinto de la orden; los que no le gustan los rechaza al instante con
+    // badXmlContent / badJsonContent, así que se prueban en orden hasta dar con el suyo (se recuerda para la siguiente).
+    const variants = [
+      { key: 'xml', uri: '/ISAPI/AccessControl/CaptureFingerPrint', contentType: 'application/xml',
+        body: `<?xml version="1.0" encoding="UTF-8"?><CaptureFingerPrintCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><fingerNo>${no}</fingerNo></CaptureFingerPrintCond>` },
+      { key: 'xml_typed', uri: '/ISAPI/AccessControl/CaptureFingerPrint', contentType: 'application/xml',
+        body: `<?xml version="1.0" encoding="UTF-8"?><CaptureFingerPrintCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><fingerNo>${no}</fingerNo><fingerPrintType>normalFP</fingerPrintType></CaptureFingerPrintCond>` },
+      { key: 'json', uri: '/ISAPI/AccessControl/CaptureFingerPrint?format=json', contentType: 'application/json',
+        body: JSON.stringify({ CaptureFingerPrintCond: { fingerNo: no } }) },
+      { key: 'xml_plain', uri: '/ISAPI/AccessControl/CaptureFingerPrint', contentType: 'application/xml',
+        body: `<CaptureFingerPrintCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><fingerNo>${no}</fingerNo></CaptureFingerPrintCond>` },
+    ];
+    if (this.captureVariant) variants.sort((a, b) => (a.key === this.captureVariant ? -1 : b.key === this.captureVariant ? 1 : 0));
+    const t0 = Date.now();
+    let r, sub = '';
+    for (const v of variants) {
+      try {
+        r = await this.request('POST', v.uri, { body: v.body, contentType: v.contentType, timeoutMs });
+      } catch (e) {
+        if (e instanceof BridgeError && e.code === 'device_timeout') throw new BridgeError('capture_timeout');
+        throw e;
+      }
+      const fingerData = r.status === 200 ? (xmlTag(r.text, 'fingerData') ?? parseJson(r.text)?.CaptureFingerPrint?.fingerData ?? null) : null;
+      if (fingerData) {
+        this.captureVariant = v.key;
+        const q = Number(xmlTag(r.text, 'fingerPrintQuality') ?? parseJson(r.text)?.CaptureFingerPrint?.fingerPrintQuality);
+        return { fingerData, quality: Number.isFinite(q) ? q : null };
+      }
+      sub = subStatus(r.text);
+      if (!/badXmlContent|badJsonContent|invalidContent|invalidFormat|badParameters/i.test(sub)) { this.captureVariant = v.key; break; }
     }
-    const fingerData = r.status === 200 ? xmlTag(r.text, 'fingerData') : null;
-    if (fingerData) {
-      const q = Number(xmlTag(r.text, 'fingerPrintQuality'));
-      return { fingerData, quality: Number.isFinite(q) ? q : null };
-    }
-    const sub = subStatus(r.text);
+    const detail = safeDetail(`${sub || ''} HTTP ${r.status} · ${scrubText(r.text).replace(/\s+/g, ' ').slice(0, 160)}`);
     if (/time\s*out|timeout/i.test(sub)) throw new BridgeError('capture_timeout');
     if (/quality/i.test(sub)) throw new BridgeError('low_quality');
     if (/busy/i.test(sub)) throw new BridgeError('device_busy');
-    if (/notSupport|invalidOperation|methodNotAllowed|badXmlContent|invalidContent/i.test(sub) || [400, 403, 404, 405, 501].includes(r.status)) {
-      throw new BridgeError('not_supported', safeDetail(sub || `HTTP ${r.status}`));
-    }
-    throw new BridgeError('capture_failed', safeDetail(sub || `HTTP ${r.status}`));
+    // "No sé hacer eso": el lector lo dice de inmediato. Si tardó varios segundos es que SÍ intentó capturar
+    // y algo falló (nadie puso el dedo, lectura mala…): se reporta como fallo de captura, no como incompatibilidad.
+    const explicit = /notSupport|invalidOperation|methodNotAllowed|badXmlContent|invalidContent|invalidFormat/i.test(sub);
+    const quick = Date.now() - t0 < 5000;
+    if (explicit || (quick && [400, 403, 404, 405, 501].includes(r.status))) throw new BridgeError('not_supported', detail);
+    throw new BridgeError('capture_failed', detail);
   }
 
   async setFingerprint(employeeNo, fingerNo, fingerData) {
@@ -375,6 +420,100 @@ export class HikDevice {
     return n;
   }
 
+  // ── rostro (HUE-17) ──
+  /**
+   * Pide al lector que capture el rostro de quien está frente a la cámara. Devuelve, solo a quien lo va a
+   * guardar en el lector, la URL temporal de la foto dentro del propio lector o la imagen en memoria.
+   * Nada de esto sale del agente (ver enrollFace).
+   */
+  async captureFace(timeoutMs) {
+    const t0 = Date.now();
+    const variants = [
+      { key: 'xml', uri: '/ISAPI/AccessControl/CaptureFaceData', contentType: 'application/xml',
+        body: `<?xml version="1.0" encoding="UTF-8"?><CaptureFaceDataCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><captureInfrared>false</captureInfrared><dataType>url</dataType></CaptureFaceDataCond>` },
+      { key: 'json', uri: '/ISAPI/AccessControl/CaptureFaceData?format=json', contentType: 'application/json',
+        body: JSON.stringify({ CaptureFaceDataCond: { captureInfrared: false, dataType: 'url' } }) },
+      { key: 'xml_binary', uri: '/ISAPI/AccessControl/CaptureFaceData', contentType: 'application/xml',
+        body: `<?xml version="1.0" encoding="UTF-8"?><CaptureFaceDataCond version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><captureInfrared>false</captureInfrared><dataType>binary</dataType></CaptureFaceDataCond>` },
+    ];
+    if (this.faceVariant) variants.sort((a, b) => (a.key === this.faceVariant ? -1 : b.key === this.faceVariant ? 1 : 0));
+    let r, sub = '';
+    for (const v of variants) {
+      try {
+        r = await this.request('POST', v.uri, { body: v.body, contentType: v.contentType, timeoutMs });
+      } catch (e) {
+        if (e instanceof BridgeError && e.code === 'device_timeout') throw new BridgeError('capture_timeout');
+        throw e;
+      }
+      if (r.status === 200) {
+        const ctype = String(r.headers['content-type'] ?? '');
+        if (/multipart/i.test(ctype)) {
+          const image = multipartImage(r.buffer, ctype);
+          if (image) { this.faceVariant = v.key; return { image, quality: null }; }
+        }
+        const j = parseJson(r.text)?.CaptureFaceData;
+        const url = xmlTag(r.text, 'faceDataUrl') ?? xmlTag(r.text, 'faceURL') ?? j?.faceDataUrl ?? j?.faceURL ?? null;
+        const progress = Number(xmlTag(r.text, 'captureProgress') ?? j?.captureProgress);
+        if (url) { this.faceVariant = v.key; return { url, quality: null }; }
+        if (Number.isFinite(progress) && progress < 100) { this.faceVariant = v.key; throw new BridgeError('capture_timeout'); }
+      }
+      sub = subStatus(r.text);
+      if (!/badXmlContent|badJsonContent|invalidContent|invalidFormat|badParameters/i.test(sub)) { this.faceVariant = v.key; break; }
+    }
+    const detail = safeDetail(`${sub || ''} HTTP ${r.status} · ${scrubText(r.text).replace(/\s+/g, ' ').slice(0, 160)}`);
+    if (/time\s*out|timeout/i.test(sub)) throw new BridgeError('capture_timeout');
+    if (/quality|noFace|faceNotDetect/i.test(sub)) throw new BridgeError('face_low_quality');
+    if (/busy/i.test(sub)) throw new BridgeError('device_busy');
+    const explicit = /notSupport|invalidOperation|methodNotAllowed|badXmlContent|invalidContent|invalidFormat/i.test(sub);
+    const quick = Date.now() - t0 < 5000;
+    if (explicit || (quick && [400, 403, 404, 405, 501].includes(r.status))) throw new BridgeError('not_supported', detail);
+    throw new BridgeError('face_capture_failed', detail);
+  }
+
+  /** Guarda en la biblioteca de rostros del lector la foto capturada (por URL interna o como imagen). */
+  async setFace(employeeNo, capture) {
+    const record = { faceLibType: 'blackFD', FDID: '1', FPID: String(employeeNo) };
+    let r;
+    if (capture.url) {
+      r = await this.request('POST', '/ISAPI/Intelligent/FDLib/FDSetUp?format=json', { body: JSON.stringify({ ...record, faceURL: capture.url }), timeoutMs: 30000 });
+      if (r.status === 200 && !/fail/i.test(String(parseJson(r.text)?.statusString ?? ''))) return;
+      // Algunos firmwares solo aceptan la imagen; se descarga del propio lector y se sube como archivo.
+      if (!capture.image && /^\//.test(capture.url)) {
+        const img = await this.request('GET', capture.url, { timeoutMs: 20000 });
+        if (img.status === 200 && img.buffer?.length) capture.image = img.buffer;
+      }
+    }
+    if (capture.image) {
+      const boundary = '----NCE' + crypto.randomBytes(8).toString('hex');
+      const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="FaceDataRecord"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(record)}\r\n`
+        + `--${boundary}\r\nContent-Disposition: form-data; name="img"; filename="face.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`);
+      const body = Buffer.concat([head, capture.image, Buffer.from(`\r\n--${boundary}--\r\n`)]);
+      r = await this.request('POST', '/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json', { body, contentType: `multipart/form-data; boundary=${boundary}`, timeoutMs: 30000 });
+      if (r.status === 200 && !/fail/i.test(String(parseJson(r.text)?.statusString ?? ''))) return;
+    }
+    const sub = r ? subStatus(r.text) : '';
+    if (/duplicate|alreadyExist|repeat/i.test(sub)) throw new BridgeError('face_duplicate');
+    if (/quality|noFace|faceNotDetect|faceDetectFail/i.test(sub)) throw new BridgeError('face_low_quality');
+    if (/full|upperLimit|overLimit|exceed/i.test(sub)) throw new BridgeError('device_full', safeDetail(sub));
+    throw new BridgeError('face_setup_failed', safeDetail(sub || (r ? `HTTP ${r.status}` : 'sin respuesta')));
+  }
+
+  /** Cuántos rostros tiene una persona en el lector (la foto nunca se descarga). */
+  async countFaces(employeeNo) {
+    const body = JSON.stringify({ searchResultPosition: 0, maxResults: 30, faceLibType: 'blackFD', FDID: '1', FPID: String(employeeNo) });
+    const r = await this.request('POST', '/ISAPI/Intelligent/FDLib/FDSearch?format=json', { body, timeoutMs: 15000 });
+    const j = parseJson(r.text);
+    if (r.status === 200 && j) {
+      const n = Number(j.numOfMatches ?? j.totalMatches ?? (Array.isArray(j.MatchList) ? j.MatchList.length : NaN));
+      if (Number.isFinite(n)) return n;
+    }
+    // Firmware sin búsqueda en la biblioteca: se usa el contador de la ficha de la persona.
+    const persons = await this.listPersons();
+    const p = persons.find((x) => x.employee_no === String(employeeNo));
+    if (!p) throw new BridgeError('face_query_failed', safeDetail(subStatus(r.text) || `HTTP ${r.status}`));
+    return p.faces;
+  }
+
   /** Personas dadas de alta en el lector: número, nombre y cuántas huellas tiene cada una (sin datos biométricos). */
   async listPersons({ max = 5000 } = {}) {
     const searchID = crypto.randomUUID();
@@ -446,7 +585,7 @@ export async function enrollFingerprint(device, { employee_no, name, finger_no =
     // huella se registra en la pantalla del propio lector (Gestión de personas → número) y aquí se espera
     // a que aparezca. Así funciona con cualquier modelo de la serie.
     if (!(e instanceof BridgeError && e.code === 'not_supported')) throw e;
-    return waitForFingerprintOnDevice(device, { employee_no, finger_no, onDeviceMode, timeoutMs: deviceModeTimeoutMs, pollMs });
+    return waitForFingerprintOnDevice(device, { employee_no, finger_no, onDeviceMode, timeoutMs: deviceModeTimeoutMs, pollMs, reason: e.detail });
   }
   const quality = capture.quality;
   try {
@@ -459,18 +598,51 @@ export async function enrollFingerprint(device, { employee_no, name, finger_no =
 }
 
 /** Espera a que la persona tenga al menos una huella registrada en el lector (alta hecha en la pantalla del lector). */
-export async function waitForFingerprintOnDevice(device, { employee_no, finger_no = 1, onDeviceMode, timeoutMs = 240000, pollMs = 4000 }) {
-  const before = await device.countFingerprints(employee_no).catch(() => 0);
-  await onDeviceMode?.({ employee_no: String(employee_no), existing: before });
+export async function waitForFingerprintOnDevice(device, { employee_no, finger_no = 1, onDeviceMode, timeoutMs = 240000, pollMs = 4000, reason = '' }) {
+  const n = await waitForBiometricOnDevice(device, (e) => device.countFingerprints(e), { employee_no, onDeviceMode, timeoutMs, pollMs, reason });
+  return { quality: null, finger_no: Number(finger_no) || 1, mode: 'on_device', fingerprints: n };
+}
+
+async function waitForBiometricOnDevice(device, count, { employee_no, onDeviceMode, timeoutMs, pollMs, reason }) {
+  const before = await count(employee_no).catch(() => 0);
+  await onDeviceMode?.({ employee_no: String(employee_no), existing: before, reason });
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     await sleep(pollMs);
     let n = 0;
-    try { n = await device.countFingerprints(employee_no); } catch { continue; }
-    if (n > before || (before === 0 && n > 0)) return { quality: null, finger_no: Number(finger_no) || 1, mode: 'on_device', fingerprints: n };
+    try { n = await count(employee_no); } catch { continue; }
+    if (n > before || (before === 0 && n > 0)) return n;
     await onDeviceMode?.({ employee_no: String(employee_no), existing: before, heartbeat: true });
   }
   throw new BridgeError('device_enroll_timeout');
+}
+
+/**
+ * HUE-17 · Alta de persona → captura del rostro → guardado en la biblioteca de rostros del lector.
+ * La foto (o su URL interna) vive solo en variables locales y se suelta en cuanto el lector la guarda.
+ * Devuelve únicamente el modo y cuántos rostros tiene la persona: ninguna imagen.
+ */
+export async function enrollFace(device, { employee_no, name }, {
+  captureTimeoutMs = 45000, onWaiting, onDeviceMode, deviceModeTimeoutMs = 240000, pollMs = 4000,
+} = {}) {
+  await device.upsertPerson(employee_no, name);
+  onWaiting?.();
+  let capture;
+  try {
+    capture = await device.captureFace(captureTimeoutMs);
+  } catch (e) {
+    if (!(e instanceof BridgeError && e.code === 'not_supported')) throw e;
+    const n = await waitForBiometricOnDevice(device, (x) => device.countFaces(x), { employee_no, onDeviceMode, timeoutMs: deviceModeTimeoutMs, pollMs, reason: e.detail });
+    return { mode: 'on_device', faces: n };
+  }
+  try {
+    await device.setFace(employee_no, capture);
+  } finally {
+    capture.image = null;
+    capture.url = null;
+    capture = null;
+  }
+  return { mode: 'remote', faces: 1 };
 }
 
 // ───────────────────────── configuración y estado ─────────────────────────
@@ -497,13 +669,31 @@ export function loadConfig(file) {
   let url = null;
   try { url = new URL(String(cfg.cloud_url ?? '')); } catch { problems.push('cloud_url: falta la dirección de la aplicación (por ejemplo https://app.tuclinica.mx).'); }
   if (url && url.protocol !== 'https:' && !isLocalHost(url.hostname)) problems.push('cloud_url: debe empezar con https:// (http:// solo se permite con localhost o una IP de la red local).');
-  if (typeof cfg.bridge_token !== 'string' || cfg.bridge_token.length < 16) problems.push('bridge_token: falta el token del agente puente.');
-  if (cfg.device !== undefined && (typeof cfg.device !== 'object' || cfg.device === null)) problems.push('device: debe ser un objeto { host, port, https, username, password }.');
+  const badDevice = (d) => d !== undefined && d !== null && typeof d !== 'object';
+  // Un lector: { bridge_token, device? }.  Varios lectores en la misma PC: { readers: [{ name, bridge_token, device? }, …] }.
+  let readers;
+  if (Array.isArray(cfg.readers)) {
+    if (!cfg.readers.length) problems.push('readers: la lista de lectores está vacía.');
+    readers = cfg.readers.map((r, i) => {
+      const label = r?.name ? `"${r.name}"` : `#${i + 1}`;
+      if (!r || typeof r !== 'object') { problems.push(`readers ${label}: debe ser un objeto { name, bridge_token }.`); return null; }
+      if (typeof r.bridge_token !== 'string' || r.bridge_token.length < 16) problems.push(`readers ${label}: falta bridge_token.`);
+      if (badDevice(r.device)) problems.push(`readers ${label}: device debe ser un objeto { host, port, https, username, password }.`);
+      return { name: String(r.name || `Lector ${i + 1}`).slice(0, 60), bridge_token: r.bridge_token, device: r.device ?? null };
+    }).filter(Boolean);
+    const tokens = new Set(readers.map((r) => r.bridge_token));
+    if (tokens.size !== readers.length) problems.push('readers: hay lectores con el mismo bridge_token (cada lector tiene el suyo en "Datos de conexión").');
+  } else {
+    if (typeof cfg.bridge_token !== 'string' || cfg.bridge_token.length < 16) problems.push('bridge_token: falta el token del agente puente.');
+    if (badDevice(cfg.device)) problems.push('device: debe ser un objeto { host, port, https, username, password }.');
+    readers = [{ name: null, bridge_token: cfg.bridge_token, device: cfg.device ?? null }];
+  }
   if (problems.length) throw new Error('config.json incompleto:\n' + problems.map((p) => '  · ' + p).join('\n'));
   return {
     cloud_url: String(cfg.cloud_url).replace(/\/+$/, ''),
-    bridge_token: cfg.bridge_token,
-    device: cfg.device ?? null,
+    bridge_token: readers[0].bridge_token,
+    device: readers[0].device,
+    readers,
     timezone: cfg.timezone || 'America/Mexico_City',
     events_interval_seconds: Number(cfg.events_interval_seconds) || 15,
     capture_timeout_seconds: Number(cfg.capture_timeout_seconds) || 45,
@@ -555,6 +745,7 @@ export function scrubResult(value, depth = 0) {
 export class Bridge {
   constructor(config, { stateFile, quiet = false } = {}) {
     this.config = config;
+    this.name = config.name ?? null;
     this.stateFile = stateFile;
     this.state = loadState(stateFile);
     this.quiet = quiet;
@@ -572,7 +763,7 @@ export class Bridge {
     this.cloudOk = null;
   }
 
-  log(msg) { if (!this.quiet) log(msg); }
+  log(msg) { if (!this.quiet) log(this.name ? `[${this.name}] ${msg}` : msg); }
 
   // ── nube ──
   async cloud(pathname, body) {
@@ -676,7 +867,21 @@ export class Bridge {
           pollMs: this.config.device_enroll_poll_ms,
           onWaiting: () => this.log(`Enrolamiento de ${p.employee_no}: esperando el dedo en el lector…`),
           onDeviceMode: async (st) => {
-            if (!st.heartbeat) this.log(`El lector no permite captura a distancia: registra la huella de ${p.employee_no} en la pantalla del lector.`);
+            if (!st.heartbeat) this.log(`El lector no permite captura a distancia (${st.reason || 'sin detalle'}): registra la huella de ${p.employee_no} en la pantalla del lector.`);
+            await this.progress(cmd.id, { stage: 'on_device', employee_no: String(p.employee_no) });
+          },
+        });
+      }
+      case 'enroll_face': {
+        if (!p.employee_no) throw new BridgeError('bad_payload');
+        await this.progress(cmd.id, { stage: 'capturing' });
+        return enrollFace(dev, p, {
+          captureTimeoutMs: this.config.capture_timeout_seconds * 1000,
+          deviceModeTimeoutMs: this.config.device_enroll_timeout_seconds * 1000,
+          pollMs: this.config.device_enroll_poll_ms,
+          onWaiting: () => this.log(`Registro de rostro de ${p.employee_no}: esperando a la persona frente a la cámara…`),
+          onDeviceMode: async (st) => {
+            if (!st.heartbeat) this.log(`El lector no permite capturar el rostro a distancia (${st.reason || 'sin detalle'}): regístralo en la pantalla del lector para ${p.employee_no}.`);
             await this.progress(cmd.id, { stage: 'on_device', employee_no: String(p.employee_no) });
           },
         });
@@ -856,13 +1061,13 @@ export class Bridge {
     return { cloudOk, deviceReachable: this.deviceReachable };
   }
 
-  async run({ once = false } = {}) {
+  async run({ once = false, stopSignal = null } = {}) {
     this.log(`Agente puente ${VERSION} iniciado. Nube: ${this.config.cloud_url}`);
     let backoff = 0;
     let stop = false;
     const onSignal = () => { stop = true; this.log('Deteniendo el agente…'); };
-    process.once('SIGINT', onSignal);
-    process.once('SIGTERM', onSignal);
+    if (stopSignal) stopSignal.addEventListener('abort', onSignal, { once: true });
+    else { process.once('SIGINT', onSignal); process.once('SIGTERM', onSignal); }
     let last = { cloudOk: false, deviceReachable: null };
     while (!stop) {
       last = await this.cycle({ forceEvents: once });
@@ -1062,12 +1267,18 @@ async function main(argv) {
     } else {
       try { cfg = loadConfig(configFile); } catch (e) { console.error(e.message + '\nO bien usa: node bridge.mjs --probe --host 192.168.80.212 --user admin --pass ****'); return 2; }
       tz = cfg.timezone;
-      if (cfg.device) dev = new HikDevice(cfg.device);
+      // Con varios lectores en config.json se indica cuál: --reader "nombre" (si no, el primero).
+      const wanted = arg('--reader');
+      const reader = wanted ? cfg.readers.find((r) => (r.name || '').toLowerCase() === wanted.toLowerCase()) : cfg.readers[0];
+      if (!reader) { console.error(`No hay un lector llamado "${wanted}" en config.json. Lectores: ${cfg.readers.map((r) => r.name).join(', ')}.`); return 2; }
+      const rc = readerConfig(cfg, reader);
+      if (rc.device) dev = new HikDevice(rc.device);
       else {
-        const b = new Bridge(cfg, { stateFile, quiet: true });
+        const b = new Bridge(rc, { stateFile: readerStateFile(stateFile, cfg, reader), quiet: true });
         try { b.useDeviceConfig((await b.cloud('/api/bridge/poll', { version: VERSION, dry_run: true })).config); } catch (e) { console.error(`No se pudieron obtener los datos del lector desde la nube (${e.message}).`); return 2; }
         dev = b.device;
       }
+      if (cfg.readers.length > 1) console.log(`Lector: ${reader.name} (usa --reader "nombre" para otro).`);
     }
     if (!dev?.host) { console.error('Faltan los datos del lector.'); return 2; }
     if (argv.includes('--probe-enroll')) {
@@ -1097,16 +1308,40 @@ async function main(argv) {
     console.error(e.message);
     return 2;
   }
-  const bridge = new Bridge(config, { stateFile });
+  const bridges = config.readers.map((r) => new Bridge(readerConfig(config, r), { stateFile: readerStateFile(stateFile, config, r) }));
   if (argv.includes('--check')) {
-    console.log(`\nDiagnóstico del agente puente ${VERSION}\n`);
-    const r = await bridge.check();
-    console.log(r.lines.join('\n'));
-    console.log(r.failures ? `\nHay ${r.failures} problema(s) por resolver.\n` : '\nTodo en orden. Ya puedes instalar el servicio (install-windows.ps1).\n');
-    return r.failures ? 1 : 0;
+    console.log(`\nDiagnóstico del agente puente ${VERSION}${bridges.length > 1 ? ` · ${bridges.length} lectores` : ''}\n`);
+    let failures = 0;
+    for (const b of bridges) {
+      if (bridges.length > 1) console.log(`── ${b.name} ──`);
+      const r = await b.check();
+      console.log(r.lines.join('\n'));
+      failures += r.failures;
+    }
+    console.log(failures ? `\nHay ${failures} problema(s) por resolver.\n` : '\nTodo en orden. Ya puedes instalar el servicio (install-windows.ps1).\n');
+    return failures ? 1 : 0;
   }
-  const last = await bridge.run({ once: argv.includes('--once') });
-  return argv.includes('--once') && !last.cloudOk ? 3 : 0;
+  const once = argv.includes('--once');
+  // Varios lectores: cada uno con su propio ciclo, en paralelo; una sola señal de paro para todos.
+  const stopper = new AbortController();
+  const onSignal = () => stopper.abort();
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  const results = await Promise.all(bridges.map((b) => b.run({ once, stopSignal: stopper.signal })));
+  return once && results.some((r) => !r.cloudOk) ? 3 : 0;
+}
+
+/** Configuración de un lector concreto: lo común de config.json más su token, su equipo y su nombre. */
+export function readerConfig(config, reader) {
+  return { ...config, bridge_token: reader.bridge_token, device: reader.device ?? null, name: config.readers.length > 1 ? reader.name : null };
+}
+
+/** state.json por lector: con un solo lector se conserva el nombre de siempre. */
+export function readerStateFile(stateFile, config, reader) {
+  if (config.readers.length <= 1) return stateFile;
+  const slug = String(reader.name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    || crypto.createHash('sha256').update(reader.bridge_token).digest('hex').slice(0, 8);
+  return stateFile.replace(/\.json$/i, '') + `-${slug}.json`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

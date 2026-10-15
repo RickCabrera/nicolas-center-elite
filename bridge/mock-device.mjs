@@ -44,7 +44,7 @@ export async function startMockDevice(opts = {}) {
     port: 0, host: '127.0.0.1', username: 'admin', password: 'Prueba123', tls: null,
     captureTimeoutMs: 3000, autoFingerMs: null, offsetMin: -360, pushPhoto: true,
     model: 'DS-K1T321EFWX-B', serial: 'DS-K1T321EFWX-B20260130V030950ENFX0000001', firmware: 'V3.9.50', build: 'build 260130',
-    deleteSteps: 1, listenerSupported: true, captureSupported: true, quiet: true,
+    deleteSteps: 1, listenerSupported: true, captureSupported: true, captureFormat: 'any', faceCaptureSupported: true, faceSetupMode: 'url', quiet: true,
     ...opts,
   };
   const realm = 'DS-MOCK';
@@ -52,6 +52,8 @@ export async function startMockDevice(opts = {}) {
   const state = {
     users: new Map(),         // employeeNo → { name, userType }
     fingerprints: new Map(),  // employeeNo → { fingerPrintID, fingerData }
+    faces: new Map(),         // employeeNo → { bytes }   (la foto jamás sale del "lector")
+    capturedFaces: new Map(), // url interna → bytes (foto recién capturada, pendiente de guardar)
     events: [],               // { major, minor, time, employeeNoString?, name?, serialNo, currentVerifyMode }
     serial: 0,
     clockOffsetMs: 0,         // desfase del reloj del lector respecto al real
@@ -62,6 +64,8 @@ export async function startMockDevice(opts = {}) {
     authFailures: 0,
     pendingCapture: null,     // { resolve }
     queuedFinger: null,
+    pendingFace: null,
+    queuedFace: null,
     lastCaptured: null,
     deleteProgress: 0,
     pushes: [],               // promesas de envíos al webhook (para pruebas)
@@ -151,21 +155,42 @@ export async function startMockDevice(opts = {}) {
     });
   }
 
-  async function readBody(req) {
+  function showFace(o = {}) {
+    const face = { fail: o.fail ?? null };
+    if (state.pendingFace) { const p = state.pendingFace; state.pendingFace = null; p.resolve(face); } else state.queuedFace = face;
+  }
+  function waitFace() {
+    if (state.queuedFace) { const f = state.queuedFace; state.queuedFace = null; return Promise.resolve(f); }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { state.pendingFace = null; resolve({ fail: 'timeout' }); }, cfg.captureTimeoutMs);
+      state.pendingFace = { resolve: (f) => { clearTimeout(timer); resolve(f); } };
+    });
+  }
+  const fakeJpeg = () => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(512), Buffer.from([0xff, 0xd9])]);
+
+  async function readBodyBuffer(req) {
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    return Buffer.concat(chunks).toString('utf8');
+    return Buffer.concat(chunks);
   }
 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://mock');
     const p = url.pathname;
-    const body = ['POST', 'PUT'].includes(req.method) ? await readBody(req) : '';
+    const rawBody = ['POST', 'PUT'].includes(req.method) ? await readBodyBuffer(req) : Buffer.alloc(0);
+    const body = rawBody.toString('utf8');
 
     // ── control (sin autenticación) ──
     if (p.startsWith('/__control/')) {
       const j = body ? JSON.parse(body) : {};
       if (p === '/__control/finger') { placeFinger(j); return send(res, 200, { ok: true }); }
+      if (p === '/__control/face') { showFace(j); return send(res, 200, { ok: true }); }
+      // Simula que alguien registró el rostro en la pantalla del lector (firmware sin captura a distancia).
+      if (p === '/__control/enroll-face-on-device') {
+        if (!state.users.has(String(j.employeeNo))) return send(res, 404, { error: 'persona inexistente' });
+        state.faces.set(String(j.employeeNo), { bytes: fakeJpeg() });
+        return send(res, 200, { ok: true });
+      }
       if (p === '/__control/event') return send(res, 200, addEvent(j));
       if (p === '/__control/scan') {
         const known = state.fingerprints.has(String(j.employeeNo));
@@ -185,7 +210,7 @@ export async function startMockDevice(opts = {}) {
       }
       if (p === '/__control/state') {
         return send(res, 200, {
-          users: [...state.users].map(([employeeNo, u]) => ({ employeeNo, ...u, hasFingerprint: state.fingerprints.has(employeeNo) })),
+          users: [...state.users].map(([employeeNo, u]) => ({ employeeNo, ...u, hasFingerprint: state.fingerprints.has(employeeNo), hasFace: state.faces.has(employeeNo) })),
           events: state.events, listener: state.listener, webhookUrl: state.webhookUrl, requests: state.requests.length, authFailures: state.authFailures,
         });
       }
@@ -249,13 +274,20 @@ export async function startMockDevice(opts = {}) {
     }
     if (req.method === 'POST' && p === '/ISAPI/AccessControl/CaptureFingerPrint' && !cfg.captureSupported) return errXml(res, 'notSupport', 403);
     if (req.method === 'POST' && p === '/ISAPI/AccessControl/CaptureFingerPrint') {
-      const fingerNo = Number(xmlTag(body, 'fingerNo')) || 1;
+      // Formato de la orden que acepta este "firmware": any | json | xml_decl (los demás: badXmlContent al instante).
+      const isJson = url.searchParams.get('format') === 'json';
+      if (cfg.captureFormat === 'json' && !isJson) return errXml(res, 'badXmlContent');
+      if (cfg.captureFormat === 'xml_decl' && (isJson || !/^<\?xml/.test(body.trim()))) return isJson ? errJson(res, 'badJsonContent') : errXml(res, 'badXmlContent');
+      if (isJson && cfg.captureFormat !== 'json' && cfg.captureFormat !== 'any') return errJson(res, 'badJsonContent');
+      state.captureFormatsSeen = [...(state.captureFormatsSeen ?? []), isJson ? 'json' : /^<\?xml/.test(body.trim()) ? 'xml_decl' : 'xml_plain'];
+      const fingerNo = (isJson ? Number(JSON.parse(body)?.CaptureFingerPrintCond?.fingerNo) : Number(xmlTag(body, 'fingerNo'))) || 1;
       if (state.pendingCapture) return errXml(res, 'deviceBusy', 503);
       const f = await waitFinger();
       if (f.fail === 'timeout') return errXml(res, 'captureFingerPrintTimeout');
       if (f.fail === 'quality') return errXml(res, 'fingerPrintQualityPoor');
       const fingerData = crypto.randomBytes(384).toString('base64');
       state.lastCaptured = fingerData;
+      if (isJson) return send(res, 200, { CaptureFingerPrint: { fingerData, fingerNo, fingerPrintQuality: f.quality } });
       return send(res, 200, `<?xml version="1.0" encoding="UTF-8"?><CaptureFingerPrint version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><fingerData>${fingerData}</fingerData><fingerNo>${fingerNo}</fingerNo><fingerPrintQuality>${f.quality}</fingerPrintQuality></CaptureFingerPrint>`, 'application/xml');
     }
     if (req.method === 'POST' && p === '/ISAPI/AccessControl/FingerPrint/SetUp') {
@@ -270,6 +302,7 @@ export async function startMockDevice(opts = {}) {
       for (const e of d?.EmployeeNoList ?? []) {
         state.users.delete(String(e.employeeNo));
         state.fingerprints.delete(String(e.employeeNo));
+        state.faces.delete(String(e.employeeNo));
       }
       state.deleteProgress = cfg.deleteSteps;
       return okJson(res);
@@ -308,13 +341,69 @@ export async function startMockDevice(opts = {}) {
     }
     if (req.method === 'POST' && p === '/ISAPI/AccessControl/UserInfo/Search') {
       const c = JSON.parse(body).UserInfoSearchCond;
-      const all = [...state.users].map(([employeeNo, u]) => ({ employeeNo, name: u.name, userType: u.userType, numOfFP: state.fingerprints.has(employeeNo) ? 1 : 0, numOfFace: 0, numOfCard: 0 }));
+      const all = [...state.users].map(([employeeNo, u]) => ({ employeeNo, name: u.name, userType: u.userType, numOfFP: state.fingerprints.has(employeeNo) ? 1 : 0, numOfFace: state.faces.has(employeeNo) ? 1 : 0, numOfCard: 0 }));
       const pos = Number(c?.searchResultPosition) || 0;
       const page = all.slice(pos, pos + Math.min(Number(c?.maxResults) || 30, 30));
       return send(res, 200, { UserInfoSearch: { searchID: c?.searchID, responseStatusStrg: all.length === 0 ? 'NO MATCH' : pos + page.length < all.length ? 'MORE' : 'OK', numOfMatches: page.length, totalMatches: all.length, UserInfo: page } });
     }
+    // ── rostro ──
+    if (req.method === 'POST' && p === '/ISAPI/AccessControl/CaptureFaceData') {
+      if (!cfg.faceCaptureSupported) return errXml(res, 'notSupport', 403);
+      if (!/<CaptureFaceDataCond/.test(body)) return errXml(res, 'badXmlContent');
+      const f = await waitFace();
+      if (f.fail === 'timeout') return send(res, 200, `<?xml version="1.0" encoding="UTF-8"?><CaptureFaceData version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><captureProgress>0</captureProgress></CaptureFaceData>`, 'application/xml');
+      if (f.fail === 'quality') return errXml(res, 'faceQualityPoor');
+      const bytes = fakeJpeg();
+      const url = `/LOCALHOST/FaceData/${crypto.randomBytes(6).toString('hex')}.jpg`;
+      state.capturedFaces.set(url, bytes);
+      if (cfg.faceSetupMode === 'binary') {
+        const boundary = 'MIME_boundary';
+        const parts = [Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="CaptureFaceData"\r\nContent-Type: application/xml\r\n\r\n<CaptureFaceData><captureProgress>100</captureProgress></CaptureFaceData>\r\n`),
+          Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="faceImage"; filename="face.jpg"\r\nContent-Type: image/jpeg\r\nContent-Length: ${bytes.length}\r\n\r\n`), bytes, Buffer.from(`\r\n--${boundary}--\r\n`)];
+        const buf = Buffer.concat(parts);
+        res.writeHead(200, { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': buf.length, Connection: 'close' });
+        return res.end(buf);
+      }
+      return send(res, 200, `<?xml version="1.0" encoding="UTF-8"?><CaptureFaceData version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><captureProgress>100</captureProgress><faceDataUrl>${url}</faceDataUrl></CaptureFaceData>`, 'application/xml');
+    }
+    if (req.method === 'GET' && p.startsWith('/LOCALHOST/FaceData/')) {
+      const bytes = state.capturedFaces.get(p);
+      if (!bytes) return errXml(res, 'notFound', 404);
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': bytes.length, Connection: 'close' });
+      return res.end(bytes);
+    }
+    if (req.method === 'POST' && p === '/ISAPI/Intelligent/FDLib/FDSetUp') {
+      if (cfg.faceSetupMode === 'binary') return errJson(res, 'notSupport', 403);
+      const c = JSON.parse(body);
+      if (!c?.FPID || !c.faceURL) return errJson(res, 'badJsonContent');
+      if (!state.users.has(String(c.FPID))) return errJson(res, 'employeeNoNotExist');
+      const bytes = state.capturedFaces.get(c.faceURL);
+      if (!bytes) return errJson(res, 'faceURLInvalid');
+      state.faces.set(String(c.FPID), { bytes });
+      state.capturedFaces.delete(c.faceURL);
+      return okJson(res);
+    }
+    if (req.method === 'POST' && p === '/ISAPI/Intelligent/FDLib/FaceDataRecord') {
+      const ct = String(req.headers['content-type'] ?? '');
+      const m = /boundary=([^;]+)/.exec(ct);
+      if (!m) return errJson(res, 'badJsonContent');
+      const txt = rawBody.toString('latin1');
+      const jm = /name="FaceDataRecord"[\s\S]*?\r\n\r\n([\s\S]*?)\r\n--/.exec(txt);
+      const rec = jm ? JSON.parse(jm[1]) : null;
+      const hasJpeg = rawBody.indexOf(Buffer.from([0xff, 0xd8])) !== -1;
+      if (!rec?.FPID || !hasJpeg) return errJson(res, 'badJsonContent');
+      if (!state.users.has(String(rec.FPID))) return errJson(res, 'employeeNoNotExist');
+      state.faces.set(String(rec.FPID), { bytes: fakeJpeg() });
+      return okJson(res);
+    }
+    if (req.method === 'POST' && p === '/ISAPI/Intelligent/FDLib/FDSearch') {
+      const c = JSON.parse(body);
+      const has = state.faces.has(String(c?.FPID));
+      return send(res, 200, { responseStatusStrg: has ? 'OK' : 'NO MATCH', numOfMatches: has ? 1 : 0, totalMatches: has ? 1 : 0, ...(has ? { MatchList: [{ FPID: String(c.FPID), faceURL: '[omitido]' }] } : {}) });
+    }
     if (req.method === 'GET' && /\/capabilities$/.test(p)) {
       if (p.includes('CaptureFingerPrint') && !cfg.captureSupported) return errXml(res, 'notSupport', 404);
+      if (p.includes('CaptureFaceData') && !cfg.faceCaptureSupported) return errXml(res, 'notSupport', 404);
       return send(res, 200, `<?xml version="1.0" encoding="UTF-8"?><Capabilities version="2.0"><supported>true</supported></Capabilities>`, 'application/xml');
     }
     if (p === '/ISAPI/Event/notification/httpHosts' && req.method === 'GET') {
@@ -342,7 +431,7 @@ export async function startMockDevice(opts = {}) {
   const port = server.address().port;
   return {
     port, host: cfg.host, url: `${cfg.tls ? 'https' : 'http'}://${cfg.host}:${port}`, state, config: cfg,
-    placeFinger, addEvent,
+    placeFinger, showFace, addEvent,
     setWebhook: (u) => { state.webhookUrl = u; },
     expireNonces: () => nonces.clear(),
     close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(() => resolve()); }),
@@ -356,7 +445,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const dev = await startMockDevice({
     port: Number(arg('--port', 8088)), host: arg('--host', '127.0.0.1'), username: arg('--user', 'admin'), password: arg('--password', 'Prueba123'),
     autoFingerMs: arg('--auto-finger') ? Number(arg('--auto-finger')) : null, captureTimeoutMs: Number(arg('--capture-timeout', 20000)),
-    captureSupported: !a.includes('--no-remote-capture'),
+    captureSupported: !a.includes('--no-remote-capture'), faceCaptureSupported: !a.includes('--no-remote-capture'),
     webhookUrl: arg('--webhook'),
   });
   console.log(`Simulador de lector Hikvision escuchando en ${dev.url}`);

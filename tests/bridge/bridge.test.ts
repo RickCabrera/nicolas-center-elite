@@ -27,11 +27,13 @@ type Cmd = { id: string; kind: string; payload: Record<string, unknown> };
 type Cloud = {
   url: string; queue: Cmd[]; results: any[]; events: any[]; polls: any[]; raw: string[]; progress: any[];
   down: boolean; eventsDown: boolean; deviceConfig: Record<string, unknown> | null; close: () => Promise<void>;
+  /** token → datos del lector (varios lectores en el mismo agente). */
+  extraTokens: Record<string, Record<string, unknown>>;
 };
 
 /** Nube falsa: mismas rutas y sobre de respuesta que la API real. */
 async function startCloud(tls?: { key: string; cert: string }): Promise<Cloud> {
-  const c: Cloud = { url: '', queue: [], results: [], events: [], polls: [], raw: [], progress: [], down: false, eventsDown: false, deviceConfig: null, close: async () => {} };
+  const c: Cloud = { url: '', queue: [], results: [], events: [], polls: [], raw: [], progress: [], down: false, eventsDown: false, deviceConfig: null, extraTokens: {}, close: async () => {} };
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const chunks: Buffer[] = [];
     for await (const ch of req) chunks.push(ch as Buffer);
@@ -39,18 +41,22 @@ async function startCloud(tls?: { key: string; cert: string }): Promise<Cloud> {
     c.raw.push(`${req.url} ${text}`);
     const reply = (status: number, body: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     if (c.down) return reply(503, { ok: false, error: { code: 'down', message: 'fuera de servicio' } });
-    if (req.headers.authorization !== `Bearer ${TOKEN}`) return reply(401, { ok: false, error: { code: 'unauthorized', message: 'no' } });
+    const bearer = String(req.headers.authorization ?? '').replace(/^Bearer /, '');
+    const extra = c.extraTokens[bearer];
+    if (bearer !== TOKEN && !extra) return reply(401, { ok: false, error: { code: 'unauthorized', message: 'no' } });
     const body = text ? JSON.parse(text) : {};
+    if (extra) body.reader_token = bearer;
     if (req.url === '/api/bridge/poll') {
       c.polls.push(body);
-      const commands = body.dry_run ? [] : c.queue.splice(0, 5);
-      return reply(200, { ok: true, data: { commands, config: { ...(c.deviceConfig ?? { host: '', port: 80, use_https: false, username: 'admin', password: '' }), poll_seconds: 2, backfill_since: null } } });
+      const commands = body.dry_run ? [] : extra ? [] : c.queue.splice(0, 5);
+      const cfg = extra ?? c.deviceConfig ?? { host: '', port: 80, use_https: false, username: 'admin', password: '' };
+      return reply(200, { ok: true, data: { commands, config: { ...cfg, poll_seconds: 2, backfill_since: null } } });
     }
     if (req.url === '/api/bridge/progress') { c.progress.push(body); return reply(200, { ok: true, data: { ok: true } }); }
     if (req.url === '/api/bridge/result') { c.results.push(body); return reply(200, { ok: true, data: { status: 'done' } }); }
     if (req.url === '/api/bridge/events') {
       if (c.eventsDown) return reply(503, { ok: false, error: { code: 'down', message: 'x' } });
-      c.events.push(...body.events);
+      c.events.push(...body.events.map((e: any) => (extra ? { ...e, reader_token: bearer } : e)));
       return reply(200, { ok: true, data: { received: body.events.length, created: body.events.length, ignored: 0 } });
     }
     if (req.url === '/api/bridge/heartbeat') return reply(200, { ok: true, data: { device_name: 'Recepción de prueba' } });
@@ -100,7 +106,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nce-bridge-'));
   device = await startMockDevice({ password: PASSWORD, captureTimeoutMs: 600, autoFingerMs: 80 });
-  Object.assign(cloud, { queue: [], results: [], events: [], polls: [], raw: [], progress: [], down: false, eventsDown: false, deviceConfig: null });
+  Object.assign(cloud, { queue: [], results: [], events: [], polls: [], raw: [], progress: [], down: false, eventsDown: false, deviceConfig: null, extraTokens: {} });
   writeConfig();
 });
 afterEach(async () => {
@@ -552,5 +558,176 @@ describe('lector real · compatibilidad con cualquier firmware', () => {
     }
     fs.writeFileSync(f, JSON.stringify({ cloud_url: 'http://8.8.8.8:3100', bridge_token: TOKEN }));
     expect(() => loadConfig(f)).toThrow(/https/);
+  });
+});
+
+describe('lector real · formato de la orden de captura', () => {
+  it('firmware que exige XML con encabezado (badXmlContent con el formato viejo): el agente prueba formatos y captura', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD, captureTimeoutMs: 600, autoFingerMs: 80, captureFormat: 'xml_decl' });
+    writeConfig();
+    const id = queue('enroll_fingerprint', { employee_no: 'P3001', name: 'Ana Ruiz', finger_no: 1 });
+    const r = await runBridge('--once');
+    expect(r.code).toBe(0);
+    expect(resultOf(id)).toMatchObject({ ok: true, result: { quality: 85, mode: 'remote' } });
+    expect(device.state.fingerprints.has('P3001')).toBe(true);
+    // No cayó al modo "registrar en pantalla".
+    expect(cloud.progress.some((x) => x.stage === 'on_device')).toBe(false);
+  });
+
+  it('firmware que solo acepta JSON: también captura, y recuerda el formato para la siguiente', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD, captureTimeoutMs: 600, autoFingerMs: 80, captureFormat: 'json' });
+    writeConfig();
+    const a = queue('enroll_fingerprint', { employee_no: 'P3002', name: 'Luis Peña', finger_no: 1 });
+    const b = queue('enroll_fingerprint', { employee_no: 'P3003', name: 'Sara Gil', finger_no: 1 });
+    const r = await runBridge('--once');
+    expect(r.code).toBe(0);
+    expect(resultOf(a)).toMatchObject({ ok: true, result: { mode: 'remote' } });
+    expect(resultOf(b)).toMatchObject({ ok: true, result: { mode: 'remote' } });
+    const seen: string[] = device.state.captureFormatsSeen;
+    expect(seen.at(-1)).toBe('json');
+    // Segunda captura: a la primera, sin volver a probar los formatos rechazados.
+    const rejected = (device.state.requests as { path: string }[]).filter((x) => x.path === '/ISAPI/AccessControl/CaptureFingerPrint').length;
+    expect(rejected).toBeLessThanOrEqual(4 + 1); // 3 rechazos + 1 acierto en la primera, 1 acierto en la segunda
+    const template = device.state.lastCaptured as string;
+    expect(cloud.raw.join('\n')).not.toContain(template.slice(0, 40));
+  });
+});
+
+describe('HUE-17 · rostro', () => {
+  const noFaceLeak = (text: string) => {
+    expect(text).not.toMatch(/faceData|faceURL|face_?url|image/i);
+    expect(text).not.toMatch(/[A-Za-z0-9+/=]{200,}/);
+  };
+
+  it('Record → CaptureFaceData → FDSetUp (por URL interna del lector); la foto nunca sale del puente', async () => {
+    const id = queue('enroll_face', { employee_no: 'P4001', name: 'Mario Luna' });
+    const run = runBridge('--once');
+    for (let i = 0; i < 60 && !(device.state.pendingFace); i++) await new Promise((r) => setTimeout(r, 50));
+    device.showFace();
+    const r = await run;
+    expect(r.code).toBe(0);
+    expect(resultOf(id)).toMatchObject({ ok: true, result: { mode: 'remote', faces: 1 } });
+    expect(device.state.faces.has('P4001')).toBe(true);
+    const paths = (device.state.requests as { path: string }[]).map((x) => x.path);
+    expect(paths).toContain('/ISAPI/AccessControl/CaptureFaceData');
+    expect(paths).toContain('/ISAPI/Intelligent/FDLib/FDSetUp');
+    noFaceLeak(cloud.raw.join('\n'));
+    noFaceLeak(r.out);
+    for (const f of fs.readdirSync(dir)) noFaceLeak(fs.readFileSync(path.join(dir, f), 'utf8'));
+  });
+
+  it('firmware que entrega la foto en binario y solo acepta FaceDataRecord (multipart)', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD, captureTimeoutMs: 600, faceSetupMode: 'binary' });
+    writeConfig();
+    const id = queue('enroll_face', { employee_no: 'P4002', name: 'Elsa Prado' });
+    const run = runBridge('--once');
+    for (let i = 0; i < 60 && !(device.state.pendingFace); i++) await new Promise((r) => setTimeout(r, 50));
+    device.showFace();
+    const r = await run;
+    expect(r.code).toBe(0);
+    expect(resultOf(id)).toMatchObject({ ok: true, result: { mode: 'remote' } });
+    expect(device.state.faces.has('P4002')).toBe(true);
+    expect((device.state.requests as { path: string }[]).map((x) => x.path)).toContain('/ISAPI/Intelligent/FDLib/FaceDataRecord');
+    noFaceLeak(cloud.raw.join('\n'));
+  });
+
+  it('nadie se pone frente a la cámara: capture_timeout', async () => {
+    const id = queue('enroll_face', { employee_no: 'P4003', name: 'Nadie' });
+    const r = await runBridge('--once');
+    expect(r.code).toBe(0);
+    expect(resultOf(id)).toMatchObject({ ok: false, error: 'capture_timeout' });
+    expect(device.state.faces.has('P4003')).toBe(false);
+  });
+
+  it('firmware sin captura de rostro a distancia: se registra en la pantalla del lector y el agente lo confirma', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD, faceCaptureSupported: false });
+    writeConfig({ device_enroll_poll_ms: 100, device_enroll_timeout_seconds: 15 });
+    const id = queue('enroll_face', { employee_no: 'P4004', name: 'Irene Vega' });
+    const run = runBridge('--once');
+    for (let i = 0; i < 60 && !cloud.progress.some((x) => x.stage === 'on_device'); i++) await new Promise((r) => setTimeout(r, 100));
+    expect(cloud.progress.find((x) => x.stage === 'on_device')).toMatchObject({ command_id: id, employee_no: 'P4004' });
+    await fetch(`${device.url}/__control/enroll-face-on-device`, { method: 'POST', body: JSON.stringify({ employeeNo: 'P4004' }) });
+    const r = await run;
+    expect(r.code).toBe(0);
+    expect(resultOf(id)).toMatchObject({ ok: true, result: { mode: 'on_device', faces: 1 } });
+    noFaceLeak(cloud.raw.join('\n'));
+  });
+
+  it('delete_person también borra el rostro', async () => {
+    await fetch(`${device.url}/__control/person`, { method: 'POST', body: JSON.stringify({ employeeNo: 'P4005', name: 'X' }) });
+    await fetch(`${device.url}/__control/enroll-face-on-device`, { method: 'POST', body: JSON.stringify({ employeeNo: 'P4005' }) });
+    const id = queue('delete_person', { employee_no: 'P4005' });
+    await runBridge('--once');
+    expect(resultOf(id)).toMatchObject({ ok: true });
+    expect(device.state.faces.has('P4005')).toBe(false);
+  });
+});
+
+describe('varios lectores en la misma PC', () => {
+  const TOKEN_B = 'segundo-token-del-agente-puente-9876543210';
+  let deviceB: any;
+  afterEach(async () => { await deviceB?.close(); deviceB = null; });
+
+  it('config.json con "readers": un ciclo por lector, cada uno con su token, su equipo y su state.json', async () => {
+    deviceB = await startMockDevice({ password: PASSWORD, serial: 'DS-K1T321EFWX-B20260130V030950ENFX0000002' });
+    cloud.extraTokens[TOKEN_B] = { host: '127.0.0.1', port: deviceB.port, use_https: false, username: 'admin', password: PASSWORD };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+      cloud_url: cloud.url, capture_timeout_seconds: 4, delete_poll_ms: 20,
+      readers: [
+        { name: 'Recepción Córdoba', bridge_token: TOKEN, device: { host: '127.0.0.1', port: device.port, https: false, username: 'admin', password: PASSWORD } },
+        { name: 'Recepción Orizaba', bridge_token: TOKEN_B },
+      ],
+    }));
+    device.addEvent({ employeeNo: 'P1', minor: 38 });
+    deviceB.addEvent({ employeeNo: 'P2', minor: 38 });
+    const id = queue('ping');
+    const r = await runBridge('--once');
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('[Recepción Córdoba]');
+    expect(r.out).toContain('[Recepción Orizaba]');
+    // La orden salió por el lector A (su token); el B solo mandó sus eventos.
+    expect(resultOf(id)).toMatchObject({ ok: true, result: { serial: expect.stringContaining('0000001') } });
+    const bySerial = (dev: any) => (dev.state.requests as { path: string; authorized: boolean }[]).filter((x) => x.authorized && x.path === '/ISAPI/System/deviceInfo').length;
+    expect(bySerial(device)).toBeGreaterThan(0);
+    expect(bySerial(deviceB)).toBeGreaterThan(0);
+    expect(cloud.events.find((e) => e.employee_no === 'P1')?.reader_token).toBeUndefined();
+    expect(cloud.events.find((e) => e.employee_no === 'P2')?.reader_token).toBe(TOKEN_B);
+    const files = fs.readdirSync(dir).filter((f) => f.startsWith('state')).sort();
+    expect(files).toEqual(['state-recepcion-cordoba.json', 'state-recepcion-orizaba.json']);
+  });
+
+  it('--check revisa cada lector y lo dice por nombre', async () => {
+    deviceB = await startMockDevice({ password: 'otra' });
+    cloud.extraTokens[TOKEN_B] = { host: '127.0.0.1', port: deviceB.port, use_https: false, username: 'admin', password: PASSWORD };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+      cloud_url: cloud.url,
+      readers: [
+        { name: 'A', bridge_token: TOKEN, device: { host: '127.0.0.1', port: device.port, https: false, username: 'admin', password: PASSWORD } },
+        { name: 'B', bridge_token: TOKEN_B },
+      ],
+    }));
+    const r = await runBridge('--check');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('2 lectores');
+    expect(r.out).toContain('── A ──');
+    expect(r.out).toContain('── B ──');
+    expect(r.out).toMatch(/B ──[\s\S]*rechazó el usuario o la contraseña/);
+  });
+
+  it('config.json con readers mal formados o tokens repetidos: mensaje claro', () => {
+    const f = path.join(dir, 'config.json');
+    fs.writeFileSync(f, JSON.stringify({ cloud_url: 'https://app.x', readers: [{ name: 'A', bridge_token: TOKEN }, { name: 'B', bridge_token: TOKEN }] }));
+    expect(() => loadConfig(f)).toThrow(/mismo bridge_token/);
+    fs.writeFileSync(f, JSON.stringify({ cloud_url: 'https://app.x', readers: [] }));
+    expect(() => loadConfig(f)).toThrow(/vacía/);
+    fs.writeFileSync(f, JSON.stringify({ cloud_url: 'https://app.x', readers: [{ name: 'A' }] }));
+    expect(() => loadConfig(f)).toThrow(/falta bridge_token/);
+    // Un solo lector sigue igual que siempre.
+    fs.writeFileSync(f, JSON.stringify({ cloud_url: 'https://app.x', bridge_token: TOKEN }));
+    expect(loadConfig(f).readers).toEqual([{ name: null, bridge_token: TOKEN, device: null }]);
   });
 });

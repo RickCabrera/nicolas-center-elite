@@ -8,10 +8,16 @@ import { ConsentSheet } from '@/modules/record/consent-sheet';
 import type { EnrollInfo } from './types';
 import { waitForCommand } from './use-command';
 
-type Scan = { commandId: string; deviceName: string; bridgeOnline: boolean; started: boolean; onDevice: string | null };
+type Method = 'fingerprint' | 'face';
+type Scan = { method: Method; commandId: string; deviceName: string; bridgeOnline: boolean; started: boolean; onDevice: string | null };
+const WORD: Record<Method, { what: string; action: string; done: string; prompt: string; onDevice: string }> = {
+  fingerprint: { what: 'huella', action: 'Registrar huella', done: 'Huella registrada', prompt: 'Coloca el dedo en el lector', onDevice: 'Huella (Fingerprint) → coloca el dedo las veces que pida' },
+  face: { what: 'rostro', action: 'Registrar rostro', done: 'Rostro registrado', prompt: 'Mira de frente a la cámara del lector', onDevice: 'Rostro (Face) → mira a la cámara hasta que confirme' },
+};
 
 /**
- * HUE-07 / HUE-13 · Botón para registrar (o eliminar) la huella de un paciente o de un miembro del equipo.
+ * HUE-07 / HUE-13 / HUE-17 · Botones para registrar la huella o el rostro (o eliminar a la persona del lector)
+ * de un paciente o de un miembro del equipo.
  * La captura ocurre en el lector de recepción a través del agente puente; aquí solo se pide, se espera
  * y se muestra el resultado. La huella nunca pasa por el navegador ni por la nube (HUE-16).
  */
@@ -32,6 +38,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
   useEffect(() => { alive.current = true; return () => { alive.current = false; aborted.current = true; }; }, []);
 
   const enrolled = info.data ? info.data.enrolled_at : (enrolledAt ?? null);
+  const faceEnrolled = info.data?.face_enrolled_at ?? null;
   const label = personType === 'patient' ? 'Registrar huella del paciente' : 'Registrar huella';
 
   const finish = async () => {
@@ -40,17 +47,18 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
     onDone?.();
   };
 
-  const start = async () => {
+  const start = async (method: Method = 'fingerprint') => {
+    const w = WORD[method];
     setMessage(null);
     setStarting(true);
     aborted.current = false;
     try {
-      const r = await api.post<{ command_id: string; device_name: string; bridge_online: boolean }>('/api/enrollments', { person_type: personType, person_id: personId });
+      const r = await api.post<{ command_id: string; device_name: string; bridge_online: boolean }>('/api/enrollments', { person_type: personType, person_id: personId, method });
       if (!alive.current) return;
-      setScan({ commandId: r.command_id, deviceName: r.device_name, bridgeOnline: r.bridge_online, started: false, onDevice: null });
+      setScan({ method, commandId: r.command_id, deviceName: r.device_name, bridgeOnline: r.bridge_online, started: false, onDevice: null });
       setStarting(false);
       const res = await waitForCommand(r.command_id, {
-        // Hasta 5 min: si el lector no captura a distancia, la huella se registra en su pantalla y eso toma más.
+        // Hasta 5 min: si el lector no captura a distancia, se registra en su pantalla y eso toma más.
         timeoutMs: 300000, intervalMs: 1500, isAborted: () => aborted.current,
         onTick: (c) => alive.current && setScan((s) => (s ? {
           ...s, bridgeOnline: c.bridge_online, started: c.status === 'running',
@@ -60,7 +68,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
       if (!alive.current || res.outcome === 'aborted') return;
       setScan(null);
       if (res.outcome === 'done') {
-        toast(res.command.result?.mode === 'on_device' ? 'Huella registrada en el lector' : 'Huella registrada');
+        toast(res.command.result?.mode === 'on_device' ? `${w.done} en el lector` : w.done);
         await finish();
       } else if (res.outcome === 'error') {
         setMessage({ tone: 'red', text: res.message });
@@ -69,7 +77,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
         setMessage({
           tone: 'gold',
           text: res.command?.status === 'pending'
-            ? 'El agente puente del lector no respondió. La orden queda en cola 10 minutos; si el lector pide el dedo, colócalo y actualiza esta pantalla.'
+            ? `El agente puente del lector no respondió. La orden queda en cola 10 minutos; si el lector pide ${method === 'face' ? 'el rostro' : 'el dedo'}, atiéndelo y actualiza esta pantalla.`
             : 'El lector no confirmó a tiempo. Actualiza la pantalla en unos segundos para ver si quedó registrada.',
         });
       }
@@ -93,11 +101,11 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
       try {
         const r = await api.del<{ cancelled: boolean }>(`/api/enrollments/${s.commandId}`);
         setMessage(r.cancelled
-          ? { tone: 'gold', text: 'Registro de huella cancelado.' }
-          : { tone: 'gold', text: 'El lector ya había recibido la orden: puede pedir el dedo durante unos segundos más.' });
+          ? { tone: 'gold', text: `Registro de ${WORD[s.method].what} cancelado.` }
+          : { tone: 'gold', text: 'El lector ya había recibido la orden: puede seguir pidiendo la captura unos segundos más.' });
       } catch { /* la orden caduca sola */ }
     } else {
-      setMessage({ tone: 'gold', text: 'La orden queda en cola 10 minutos. Cuando el agente puente vuelva, el lector pedirá el dedo.' });
+      setMessage({ tone: 'gold', text: 'La orden queda en cola 10 minutos. Cuando el agente puente vuelva, el lector pedirá la captura.' });
     }
     void info.mutate();
   };
@@ -142,14 +150,28 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
             <span className="t-mono" style={{ opacity: 0.85 }}>{fmtDate(enrolled)}</span>
           </div>
           <div className="hstack wrap" style={{ gap: 14 }}>
-            <button type="button" className="btn-link" onClick={start} disabled={starting || !!scan}>Volver a registrar</button>
-            <button type="button" className="btn-link dim" onClick={() => setConfirmRemove(true)} disabled={removing}>Eliminar huella</button>
+            <button type="button" className="btn-link" onClick={() => start('fingerprint')} disabled={starting || !!scan}>Volver a registrar</button>
+            <button type="button" className="btn-link dim" onClick={() => setConfirmRemove(true)} disabled={removing}>Eliminar del lector</button>
           </div>
         </>
       ) : (
-        <Button block onClick={start} loading={starting} disabled={!!scan || !!noDevice} style={{ minHeight: 50, gap: 10, color: 'var(--blue)' }}>
+        <Button block onClick={() => start('fingerprint')} loading={starting && scan?.method !== 'face'} disabled={!!scan || !!noDevice} style={{ minHeight: 50, gap: 10, color: 'var(--blue)' }}>
           {!starting && <FingerRings size={20} />}
           {label}
+        </Button>
+      )}
+
+      {faceEnrolled ? (
+        <div className="hstack wrap" style={{ gap: 14, alignItems: 'center' }}>
+          <span className="t-small" role="status">
+            <b style={{ color: 'var(--green)' }}>Rostro registrado</b> <span className="t-mono" style={{ opacity: 0.85 }}>{fmtDate(faceEnrolled)}</span>
+          </span>
+          <button type="button" className="btn-link" onClick={() => start('face')} disabled={starting || !!scan}>Volver a registrar rostro</button>
+          {!enrolled && <button type="button" className="btn-link dim" onClick={() => setConfirmRemove(true)} disabled={removing}>Eliminar del lector</button>}
+        </div>
+      ) : (
+        <Button block onClick={() => start('face')} loading={starting && scan?.method === 'face'} disabled={!!scan || !!noDevice} style={{ minHeight: 44, gap: 10 }}>
+          Registrar rostro
         </Button>
       )}
 
@@ -167,9 +189,9 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
 
       {scan && (
         <ScanOverlay
-          title={scan.onDevice !== null ? 'Registra la huella en el lector' : 'Registrando huella'}
+          title={scan.onDevice !== null ? `Registra ${WORD[scan.method].what === 'rostro' ? 'el rostro' : 'la huella'} en el lector` : `Registrando ${WORD[scan.method].what}`}
           sub={scan.onDevice !== null ? `Este lector no permite capturar desde la app`
-            : scan.bridgeOnline || scan.started ? `Coloca el dedo en el lector de ${scan.deviceName}` : `Esperando al lector de ${scan.deviceName}`}
+            : scan.bridgeOnline || scan.started ? `${WORD[scan.method].prompt} de ${scan.deviceName}` : `Esperando al lector de ${scan.deviceName}`}
           onCancel={scan.bridgeOnline || scan.started ? () => closeScan(!scan.started) : undefined}
         >
           {scan.onDevice !== null && (
@@ -178,9 +200,9 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
               <ol style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 1.6 }}>
                 <li>Entra al menú con la cuenta de administrador.</li>
                 <li><b>Gestión de usuarios</b> (User / Person Management) → busca el número <b className="t-mono blue">{scan.onDevice || '—'}</b>.</li>
-                <li>Editar → <b>Huella</b> (Fingerprint) → coloca el dedo las veces que pida y guarda.</li>
+                <li>Editar → <b>{WORD[scan.method].onDevice}</b> y guarda.</li>
               </ol>
-              <div className="t-small" style={{ marginTop: 8 }}>Esta pantalla se actualiza sola en cuanto el lector tenga la huella (hasta 4 minutos).</div>
+              <div className="t-small" style={{ marginTop: 8 }}>Esta pantalla se actualiza sola en cuanto el lector tenga {WORD[scan.method].what === 'rostro' ? 'el rostro' : 'la huella'} (hasta 4 minutos).</div>
             </div>
           )}
           {!scan.bridgeOnline && !scan.started && (
@@ -200,8 +222,8 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
 
       <Confirm
         open={confirmRemove} onClose={() => setConfirmRemove(false)} onConfirm={remove} danger
-        title="Eliminar huella" confirmLabel="Eliminar huella"
-        message="Se borrará a la persona y su huella del lector. Su asistencia tendrá que registrarse a mano hasta que vuelva a registrar la huella."
+        title="Eliminar del lector" confirmLabel="Eliminar"
+        message="Se borrará a la persona del lector, con su huella y su rostro. Su asistencia tendrá que registrarse a mano hasta que vuelva a registrarse."
       />
       {personType === 'patient' && (
         <ConsentSheet open={consentOpen} onClose={() => setConsentOpen(false)} patientId={personId} kind="biometric"

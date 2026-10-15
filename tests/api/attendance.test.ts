@@ -480,7 +480,7 @@ describe('HUE-07 / HUE-13 · enrolamiento', () => {
   it('paciente sin consentimiento de huella → 409 consent_required', async () => {
     const r = await call(ENROLL, { as: fx.therapistA, body: { person_type: 'patient', person_id: fx.patientA1 } });
     expect(r.status).toBe(409);
-    expect(r.error).toMatchObject({ code: 'consent_required', message: 'Falta firmar el consentimiento de huella.' });
+    expect(r.error).toMatchObject({ code: 'consent_required', message: 'Falta firmar el consentimiento de datos biométricos.' });
     const info = await call(ENROLL_INFO, { as: fx.therapistA, url: `/api/enrollments?person_type=patient&person_id=${fx.patientA1}` });
     expect(info.data).toMatchObject({ has_consent: false, enrolled_at: null, device: { name: 'Recepción Córdoba' } });
   });
@@ -526,6 +526,62 @@ describe('HUE-07 / HUE-13 · enrolamiento', () => {
     const info = await call(ENROLL_INFO, { as: fx.therapistA, url: `/api/enrollments?person_type=patient&person_id=${fx.patientA1}` });
     expect(info.data.enrolled_at).toBeTruthy();
     expect(info.data.enrollments).toMatchObject([{ status: 'enrolled', device_name: 'Recepción Córdoba' }]);
+  });
+
+  it('HUE-17 · rostro: encola enroll_face, el resultado marca face_enrolled_at y no toca la huella', async () => {
+    const r = await call(ENROLL, { as: fx.therapistA, body: { person_type: 'patient', person_id: fx.patientA1, method: 'face' } });
+    expect(r.status).toBe(200);
+    // Es otra orden distinta a la de huella en curso.
+    const fp = await call(ENROLL, { as: fx.therapistA, body: { person_type: 'patient', person_id: fx.patientA1 } });
+    expect(fp.data.command_id).not.toBe(r.data.command_id);
+    const p = await call(POLL, { headers: bearer(dev.bridge), body: { version: '1.1.0' } });
+    const cmd = p.data.commands.find((c: any) => c.id === r.data.command_id);
+    expect(cmd).toMatchObject({ kind: 'enroll_face', payload: { employee_no: emp[fx.patientA1], name: 'Ana Prueba Uno' } });
+    expect(cmd.payload.finger_no).toBeUndefined();
+    // Una foto en el resultado se rechaza igual que una plantilla de huella.
+    const leak = await call(RESULT, { headers: bearer(dev.bridge), body: { command_id: r.data.command_id, ok: true, result: { faceData: 'x'.repeat(50) } } });
+    expect(leak.status).toBe(400);
+    const r2 = await call(ENROLL, { as: fx.therapistA, body: { person_type: 'patient', person_id: fx.patientA1, method: 'face' } });
+    await call(POLL, { headers: bearer(dev.bridge), body: { version: '1.1.0' } });
+    const res = await call(RESULT, { headers: bearer(dev.bridge), body: { command_id: r2.data.command_id, ok: true, result: { mode: 'remote', faces: 1 } } });
+    expect(res.status).toBe(200);
+    // La huella registrada en la prueba anterior sigue intacta; el rostro se suma.
+    const [before] = await sqlSystem((tx) => tx`select enrolled_at from enrollments where patient_id = ${fx.patientA1}`);
+    const [pat] = await sqlSystem((tx) => tx`select fingerprint_enrolled_at from patients where id = ${fx.patientA1}`);
+    expect(pat.fingerprint_enrolled_at).toBeTruthy();
+    const enr = await sqlSystem((tx) => tx`select status, enrolled_at, face_enrolled_at from enrollments where patient_id = ${fx.patientA1}`);
+    expect(enr).toHaveLength(1);
+    expect(enr[0].status).toBe('enrolled');
+    expect(enr[0].face_enrolled_at).toBeTruthy();
+    expect(enr[0].enrolled_at).toEqual(before.enrolled_at);
+    const info = await call(ENROLL_INFO, { as: fx.therapistA, url: `/api/enrollments?person_type=patient&person_id=${fx.patientA1}` });
+    expect(info.data.face_enrolled_at).toBeTruthy();
+    expect(info.data.enrolled_at).toBeTruthy();
+    // La orden de huella que quedó en curso se cierra como fallo sin tocar lo ya registrado.
+    await call(RESULT, { headers: bearer(dev.bridge), body: { command_id: fp.data.command_id, ok: false, error: 'capture_timeout' } });
+    const after = await sqlSystem((tx) => tx`select status, face_enrolled_at from enrollments where patient_id = ${fx.patientA1}`);
+    expect(after[0]).toMatchObject({ status: 'enrolled' });
+    expect(after[0].face_enrolled_at).toBeTruthy();
+  });
+
+  it('varios lectores en la sede: "Datos de conexión" entrega un config.json con todos', async () => {
+    const one = await call(SECRETS, { as: fx.owner, params: { id: dev.id } });
+    expect(one.data.bridge_config_multi_json).toBeNull();
+    expect(one.data.multi_readers).toEqual(['Recepción Córdoba']);
+    const second = await createDevice('Consultorio 2', fx.cordoba);
+    const two = await call(SECRETS, { as: fx.owner, params: { id: dev.id } });
+    const multi = JSON.parse(two.data.bridge_config_multi_json);
+    expect(multi.readers).toEqual([
+      { name: 'Recepción Córdoba', bridge_token: dev.bridge },
+      { name: 'Consultorio 2', bridge_token: second.bridge },
+    ]);
+    expect(multi.cloud_url).toBe(JSON.parse(two.data.bridge_config_json).cloud_url);
+    // Un lector de otra sede no entra.
+    const third = await createDevice('Orizaba', fx.orizaba);
+    const three = await call(SECRETS, { as: fx.owner, params: { id: dev.id } });
+    expect(JSON.parse(three.data.bridge_config_multi_json).readers).toHaveLength(2);
+    // Los lectores de esta prueba no deben quedar para las siguientes.
+    await sqlSystem((tx) => tx`delete from devices where id in (${second.id}, ${third.id})`);
   });
 
   it('HUE-16 · un resultado con fingerData se rechaza, no se guarda y queda como incidente de seguridad', async () => {
