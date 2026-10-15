@@ -44,7 +44,7 @@ export async function startMockDevice(opts = {}) {
     port: 0, host: '127.0.0.1', username: 'admin', password: 'Prueba123', tls: null,
     captureTimeoutMs: 3000, autoFingerMs: null, offsetMin: -360, pushPhoto: true,
     model: 'DS-K1T321EFWX-B', serial: 'DS-K1T321EFWX-B20260130V030950ENFX0000001', firmware: 'V3.9.50', build: 'build 260130',
-    deleteSteps: 1, listenerSupported: true, captureSupported: true, captureFormat: 'any', faceCaptureSupported: true, faceSetupMode: 'url', quiet: true,
+    deleteSteps: 1, listenerSupported: true, captureSupported: true, captureFormat: 'any', setupAsync: false, faceCaptureSupported: true, faceSetupMode: 'url', quiet: true,
     ...opts,
   };
   const realm = 'DS-MOCK';
@@ -295,7 +295,17 @@ export async function startMockDevice(opts = {}) {
       if (!c?.employeeNo || !c.fingerData) return errJson(res, 'badJsonContent');
       if (!state.users.has(String(c.employeeNo))) return errJson(res, 'employeeNoNotExist');
       state.fingerprints.set(String(c.employeeNo), { fingerPrintID: c.fingerPrintID ?? 1, fingerData: c.fingerData });
+      if (cfg.setupAsync) {
+        // Como el lector real: acepta la orden "en proceso" y confirma en la consulta siguiente.
+        state.setupPending = 2;
+        return send(res, 200, { FingerPrintStatus: { StatusList: [{ id: 1, cardReaderRecvStatus: 0, errorMsg: '' }], totalStatus: 0 } });
+      }
       return send(res, 200, { FingerPrintStatus: { StatusList: [{ id: 1, cardReaderRecvStatus: 1, errorMsg: '' }] } });
+    }
+    if (req.method === 'GET' && p === '/ISAPI/AccessControl/FingerPrint/SetUp') {
+      const done = !(state.setupPending > 0);
+      if (!done) state.setupPending--;
+      return send(res, 200, { FingerPrintStatus: { StatusList: [{ id: 1, cardReaderRecvStatus: done ? 1 : 0, errorMsg: '' }], totalStatus: done ? 1 : 0 } });
     }
     if (req.method === 'PUT' && p === '/ISAPI/AccessControl/UserInfoDetail/Delete') {
       const d = JSON.parse(body).UserInfoDetail;

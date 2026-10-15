@@ -159,7 +159,11 @@ confirman en 5 minutos estas piezas con el DS-K1T321EFWX-B de la clínica:
 
 1. Si este firmware acepta la captura a distancia o pide registrar en pantalla (la app funciona con ambos).
    **Validado el 14/10/2026 con el DS-K1T321EFWX-B V3.9.50:** acepta la captura, pero rechaza con `badXmlContent`
-   la orden sin encabezado `<?xml …?>`; el agente ahora prueba los formatos en orden. Rostro: pendiente de probar.
+   la orden sin encabezado `<?xml …?>`; el agente ahora prueba los formatos en orden. El guardado de la huella
+   (`FingerPrint/SetUp`) responde "en proceso" y confirma en una consulta posterior; el agente espera la
+   confirmación. Un `invalidOperation` inmediato es "lector ocupado" (reintento rápido tras una captura fallida).
+   La misma huella no se puede registrar a dos personas: el lector la rechaza. **Rostro: validado el 15/10/2026**
+   (captura a distancia y guardado correctos).
 2. El formato exacto del envío por HTTP Listening (multipart con `event_log`, JSON directo o XML): el intérprete
    acepta los tres, pero conviene capturar una lectura real y guardarla en `tests/fixtures/hik/`.
 3. Los subtipos de evento de verificación correcta (38 huella, 75 rostro, 1 tarjeta) y el campo `employeeNoString`.

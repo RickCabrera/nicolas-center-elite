@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.2.1';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // ───────────────────────── utilidades ─────────────────────────
@@ -333,30 +333,53 @@ export class HikDevice {
     const detail = safeDetail(`${sub || ''} HTTP ${r.status} · ${scrubText(r.text).replace(/\s+/g, ' ').slice(0, 160)}`);
     if (/time\s*out|timeout/i.test(sub)) throw new BridgeError('capture_timeout');
     if (/quality/i.test(sub)) throw new BridgeError('low_quality');
-    if (/busy/i.test(sub)) throw new BridgeError('device_busy');
+    // "invalidOperation" al instante = el lector sigue ocupado con la captura anterior (pasa al reintentar rápido).
+    if (/busy|invalidOperation/i.test(sub)) throw new BridgeError('device_busy', detail);
     // "No sé hacer eso": el lector lo dice de inmediato. Si tardó varios segundos es que SÍ intentó capturar
     // y algo falló (nadie puso el dedo, lectura mala…): se reporta como fallo de captura, no como incompatibilidad.
-    const explicit = /notSupport|invalidOperation|methodNotAllowed|badXmlContent|invalidContent|invalidFormat/i.test(sub);
+    const explicit = /notSupport|methodNotAllowed|badXmlContent|badJsonContent|invalidContent|invalidFormat/i.test(sub);
     const quick = Date.now() - t0 < 5000;
     if (explicit || (quick && [400, 403, 404, 405, 501].includes(r.status))) throw new BridgeError('not_supported', detail);
     throw new BridgeError('capture_failed', detail);
   }
 
-  async setFingerprint(employeeNo, fingerNo, fingerData) {
+  /**
+   * Guarda la plantilla en el lector. El lector responde en dos tiempos: acepta la orden y termina de
+   * grabarla unos segundos después (`totalStatus` 0 → 1, `cardReaderRecvStatus` 0 → 1), así que si la
+   * primera respuesta viene "en proceso" se consulta el avance hasta que confirme.
+   */
+  async setFingerprint(employeeNo, fingerNo, fingerData, { pollMs = 500, maxPolls = 30 } = {}) {
     const body = JSON.stringify({
       FingerPrintCfg: { employeeNo: String(employeeNo), enableCardReader: [1], fingerPrintID: Number(fingerNo) || 1, fingerType: 'normalFP', fingerData },
     });
-    const r = await this.request('POST', '/ISAPI/AccessControl/FingerPrint/SetUp?format=json', { body, timeoutMs: 20000 });
-    const j = parseJson(r.text);
-    const list = j?.FingerPrintStatus?.StatusList;
-    const rejected = Array.isArray(list) ? list.find((s) => s && s.cardReaderRecvStatus !== undefined && Number(s.cardReaderRecvStatus) !== 1) : null;
-    const failed = r.status !== 200 || rejected || /fail/i.test(String(j?.FingerPrintStatus?.status ?? ''));
-    if (!failed) return;
-    const sub = rejected?.errorMsg || subStatus(r.text);
-    if (/duplicate|alreadyExist|repeat/i.test(sub)) throw new BridgeError('fingerprint_duplicate');
-    if (/quality/i.test(sub)) throw new BridgeError('low_quality');
-    if (/full|upperLimit|overLimit|exceed/i.test(sub)) throw new BridgeError('device_full', safeDetail(sub));
-    throw new BridgeError('setup_failed', safeDetail(sub || `HTTP ${r.status}`));
+    let r = await this.request('POST', '/ISAPI/AccessControl/FingerPrint/SetUp?format=json', { body, timeoutMs: 20000 });
+    for (let i = 0; i <= maxPolls; i++) {
+      const j = parseJson(r.text);
+      const st = j?.FingerPrintStatus ?? j;
+      const list = Array.isArray(st?.StatusList) ? st.StatusList : [];
+      const codes = list.map((s) => Number(s?.cardReaderRecvStatus)).filter(Number.isFinite);
+      const total = Number(st?.totalStatus);
+      const statusWord = String(st?.status ?? '');
+      // Listo cuando cada lector de huella reporta 1 (o, sin lista, cuando totalStatus no dice "en proceso").
+      const allDone = codes.length ? codes.every((c) => c === 1) : (Number.isFinite(total) ? total === 1 : true);
+      if (r.status === 200 && !/fail/i.test(statusWord) && allDone) return;
+      const inProgress = r.status === 200 && (total === 0 || codes.some((c) => c === 0) || /process/i.test(statusWord));
+      if (inProgress && i < maxPolls) {
+        await sleep(pollMs);
+        r = await this.request('GET', '/ISAPI/AccessControl/FingerPrint/SetUp?format=json', { timeoutMs: 10000 });
+        continue;
+      }
+      const bad = list.find((s) => s && Number(s.cardReaderRecvStatus) !== 1) ?? null;
+      const code = bad ? Number(bad.cardReaderRecvStatus) : NaN;
+      const sub = `${bad?.errorMsg || ''} ${subStatus(r.text)}`.trim();
+      const detail = safeDetail(`${Number.isFinite(code) ? `recv=${code} ` : ''}${sub} HTTP ${r.status} · ${scrubText(r.text).replace(/\s+/g, ' ').slice(0, 160)}`);
+      // Códigos del lector: 1 listo · 3/5 la huella ya existe · 2/4 lector de huella no disponible.
+      if (code === 3 || code === 5 || /duplicate|alreadyExist|repeat|exist/i.test(sub)) throw new BridgeError('fingerprint_duplicate', detail);
+      if (/quality/i.test(sub)) throw new BridgeError('low_quality', detail);
+      if (/full|upperLimit|overLimit|exceed/i.test(sub)) throw new BridgeError('device_full', detail);
+      if (inProgress) throw new BridgeError('setup_failed', `el lector no confirmó el guardado · ${detail}`);
+      throw new BridgeError('setup_failed', detail);
+    }
   }
 
   async deletePerson(employeeNo, { pollMs = 1000, maxPolls = 30 } = {}) {
@@ -463,8 +486,8 @@ export class HikDevice {
     const detail = safeDetail(`${sub || ''} HTTP ${r.status} · ${scrubText(r.text).replace(/\s+/g, ' ').slice(0, 160)}`);
     if (/time\s*out|timeout/i.test(sub)) throw new BridgeError('capture_timeout');
     if (/quality|noFace|faceNotDetect/i.test(sub)) throw new BridgeError('face_low_quality');
-    if (/busy/i.test(sub)) throw new BridgeError('device_busy');
-    const explicit = /notSupport|invalidOperation|methodNotAllowed|badXmlContent|invalidContent|invalidFormat/i.test(sub);
+    if (/busy|invalidOperation/i.test(sub)) throw new BridgeError('device_busy', detail);
+    const explicit = /notSupport|methodNotAllowed|badXmlContent|badJsonContent|invalidContent|invalidFormat/i.test(sub);
     const quick = Date.now() - t0 < 5000;
     if (explicit || (quick && [400, 403, 404, 405, 501].includes(r.status))) throw new BridgeError('not_supported', detail);
     throw new BridgeError('face_capture_failed', detail);

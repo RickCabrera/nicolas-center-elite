@@ -595,6 +595,31 @@ describe('lector real · formato de la orden de captura', () => {
   });
 });
 
+describe('lector real · guardado de la huella en dos tiempos', () => {
+  it('SetUp responde "en proceso" y confirma después: el agente espera la confirmación', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD, captureTimeoutMs: 600, autoFingerMs: 80, setupAsync: true });
+    writeConfig();
+    const id = queue('enroll_fingerprint', { employee_no: 'P5001', name: 'Rosa Mena', finger_no: 1 });
+    const r = await runBridge('--once');
+    expect(r.code).toBe(0);
+    expect(resultOf(id)).toMatchObject({ ok: true, result: { mode: 'remote', quality: 85 } });
+    const paths = (device.state.requests as { method: string; path: string }[]).filter((x) => x.path === '/ISAPI/AccessControl/FingerPrint/SetUp').map((x) => x.method);
+    expect(paths[0]).toBe('POST');
+    expect(paths.filter((m) => m === 'GET').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('"invalidOperation" al instante se reporta como lector ocupado, no como incompatibilidad', async () => {
+    const { HikDevice } = await import('../../bridge/bridge.mjs' as string);
+    const dev = new HikDevice({ host: '127.0.0.1', port: device.port, https: false, username: 'admin', password: PASSWORD });
+    dev.request = async () => ({ status: 400, headers: {}, text: '<ResponseStatus><statusString>Invalid Operation</statusString><subStatusCode>invalidOperation</subStatusCode></ResponseStatus>', buffer: Buffer.alloc(0) });
+    await expect(dev.captureFingerprint(1, 1000)).rejects.toMatchObject({ code: 'device_busy' });
+    await expect(dev.captureFace(1000)).rejects.toMatchObject({ code: 'device_busy' });
+    dev.request = async () => ({ status: 400, headers: {}, text: '<ResponseStatus><subStatusCode>notSupport</subStatusCode></ResponseStatus>', buffer: Buffer.alloc(0) });
+    await expect(dev.captureFingerprint(1, 1000)).rejects.toMatchObject({ code: 'not_supported' });
+  });
+});
+
 describe('HUE-17 · rostro', () => {
   const noFaceLeak = (text: string) => {
     expect(text).not.toMatch(/faceData|faceURL|face_?url|image/i);
