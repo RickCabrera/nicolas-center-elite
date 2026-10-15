@@ -33,6 +33,7 @@ export type Attendance = {
   source: 'device' | 'bridge' | 'manual' | 'simulator'; verify_mode: string; manual_reason: string | null;
   recorded_by_name: string | null; appointment_id: string | null; session_consumed: boolean;
   billing_state: 'pagado' | 'por_vencer' | 'vencido' | 'pausado' | 'sin_plan' | null;
+  voided_at: string | null; void_reason: string | null; voided_by_name: string | null;
 };
 export type AttendanceList = { date: string | null; total: number; items: Attendance[] };
 
@@ -51,7 +52,7 @@ export type EnrollInfo = {
 
 export type StaffReportRow = {
   user_id: string; person_name: string; location_name: string;
-  days: { date: string; first_in: string | null; last_out: string | null; minutes: number; pairs: number; incomplete: boolean }[];
+  days: { date: string; first_in: string | null; last_out: string | null; minutes: number; pairs: number; incomplete: boolean; intervals: { in: string; out: string | null; minutes: number }[] }[];
   weeks: { week_start: string; minutes: number; incomplete_days: number }[];
   total_minutes: number; incomplete_days: number;
 };

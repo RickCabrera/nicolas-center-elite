@@ -417,6 +417,7 @@ export type AttendanceItem = {
   source: 'device' | 'bridge' | 'manual' | 'simulator'; verify_mode: string; manual_reason: string | null;
   recorded_by_name: string | null; appointment_id: string | null; session_consumed: boolean;
   billing_state: string | null;
+  voided_at: Date | null; void_reason: string | null; voided_by_name: string | null;
 };
 
 /** Columnas y joins de una asistencia tal como la muestra la pantalla (HUE-10 / HUE-15). Corre bajo RLS. */
@@ -430,9 +431,12 @@ export const attendanceSelect = (db: Tx) => db`
          e.location_id, l.name as location_name, e.occurred_at, e.direction, e.source, e.verify_mode,
          e.manual_reason, nullif(trim(coalesce(rb.title, '') || ' ' || coalesce(rb.full_name, '')), '') as recorded_by_name,
          e.appointment_id, e.session_consumed,
-         case when e.person_type = 'patient' then pb.state end as billing_state
+         case when e.person_type = 'patient' then pb.state end as billing_state,
+         e.voided_at, e.void_reason,
+         nullif(trim(coalesce(vb.title, '') || ' ' || coalesce(vb.full_name, '')), '') as voided_by_name
   from attendance_events e
   join locations l on l.id = e.location_id
   left join users u on u.id = e.user_id
   left join users rb on rb.id = e.recorded_by
+  left join users vb on vb.id = e.voided_by
   left join patient_billing pb on pb.patient_id = e.patient_id`;

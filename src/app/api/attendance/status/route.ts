@@ -17,7 +17,7 @@ export const GET = route({ auth: 'user' }, async ({ user, system }) => {
       const [last] = await tx<{ person_name: string; occurred_at: Date; direction: string; person_type: string }[]>`
         select coalesce(nullif(person_name, ''), 'No reconocido') as person_name, occurred_at, direction, person_type
         from attendance_events
-        where location_id = ${d.location_id} and (device_id = ${d.id} or device_id is null)
+        where location_id = ${d.location_id} and (device_id = ${d.id} or device_id is null) and voided_at is null
           ${front ? tx`` : tx`and person_type <> 'unknown'`}
         order by occurred_at desc limit 1`;
       out.push({

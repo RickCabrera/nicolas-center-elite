@@ -20,7 +20,7 @@ const TABLE_TEXT: Record<string, [string, string]> = {
   documents: ['Emitió una receta o indicación', 'Canceló una receta o indicación'],
   memberships: ['Asignó una membresía', 'Actualizó la membresía'],
   payments: ['Registró un pago', 'Anuló un pago'],
-  attendance_events: ['Registró una asistencia manual', 'Actualizó una asistencia'],
+  attendance_events: ['Registró una asistencia manual', 'Anuló una asistencia'],
 };
 const ACTION_TEXT: Record<string, string> = {
   view: 'Abrió el expediente', export: 'Exportó información', print: 'Imprimió un documento', download: 'Descargó un archivo',

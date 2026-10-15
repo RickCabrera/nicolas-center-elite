@@ -35,6 +35,7 @@ function LiveTab() {
   const [role, setRole] = useState<Role>('all');
   const [location, setLocation] = useState('');
   const [manual, setManual] = useState(false);
+  const [voiding, setVoiding] = useState<Attendance | null>(null);
   const [scanning, setScanning] = useState(false);
   const isToday = date === today;
 
@@ -151,7 +152,7 @@ function LiveTab() {
             </Empty>
           ) : (
             <div className="stack sm" aria-live="polite">
-              {items.map((r) => <AttendanceRow key={r.id} r={r} fresh={fresh.has(r.id)} />)}
+              {items.map((r) => <AttendanceRow key={r.id} r={r} fresh={fresh.has(r.id)} onVoid={user.isFront ? () => setVoiding(r) : undefined} />)}
               {list.data!.total > items.length && <div className="t-small">Se muestran las {items.length} más recientes de {list.data!.total}.</div>}
             </div>
           )}
@@ -159,6 +160,7 @@ function LiveTab() {
 
       {scanning && <ScanOverlay title="Leyendo huella" sub="Lector de recepción" />}
       <ManualSheet open={manual} onClose={() => setManual(false)} onSaved={() => { setManual(false); if (!isToday) setDate(today); void list.mutate(); void status.mutate(); }} />
+      <VoidSheet item={voiding} onClose={() => setVoiding(null)} onDone={() => { setVoiding(null); void list.mutate(); void status.mutate(); }} />
     </>
   );
 }
@@ -208,35 +210,86 @@ function ReaderCard({ reader, sede, owner, children }: { reader: ReaderStatus | 
   );
 }
 
-function AttendanceRow({ r, fresh }: { r: Attendance; fresh: boolean }) {
+function AttendanceRow({ r, fresh, onVoid }: { r: Attendance; fresh: boolean; onVoid?: () => void }) {
+  const user = useUser();
   const unknown = r.person_type === 'unknown';
-  const overdue = r.person_type === 'patient' && r.billing_state === 'vencido';
-  const title = r.source === 'manual' ? `Registro manual${r.recorded_by_name ? ` por ${r.recorded_by_name}` : ''}: ${r.manual_reason ?? ''}` : undefined;
+  const voided = !!r.voided_at;
+  const overdue = !voided && r.person_type === 'patient' && r.billing_state === 'vencido';
+  const title = voided ? `Anulada${r.voided_by_name ? ` por ${r.voided_by_name}` : ''}: ${r.void_reason ?? ''}`
+    : r.source === 'manual' ? `Registro manual${r.recorded_by_name ? ` por ${r.recorded_by_name}` : ''}: ${r.manual_reason ?? ''}` : undefined;
+  // HUE-18 · El dueño anula cualquiera; recepción solo las de pacientes.
+  const canVoid = !!onVoid && !voided && (user.isOwner || r.person_type !== 'staff');
   return (
     <div className="row" title={title}
-      style={{ padding: '11px 12px', animation: fresh ? 'fadeUp .45s ease both' : undefined, borderColor: fresh ? 'var(--blue)' : undefined, transition: 'border-color 1.2s ease' }}>
-      <span className={`dot ${unknown ? 'red' : 'green'}`} aria-hidden="true" />
+      style={{ padding: '11px 12px', animation: fresh ? 'fadeUp .45s ease both' : undefined, borderColor: fresh ? 'var(--blue)' : undefined, transition: 'border-color 1.2s ease', opacity: voided ? 0.55 : undefined }}>
+      <span className={`dot ${unknown ? 'red' : voided ? '' : 'green'}`} aria-hidden="true" />
       <div className="grow">
         <div className="hstack" style={{ gap: 8, minWidth: 0 }}>
-          <span className="ellipsis" style={{ font: '600 15px/1.2 var(--f-body)' }}>
+          <span className="ellipsis" style={{ font: '600 15px/1.2 var(--f-body)', textDecoration: voided ? 'line-through' : undefined }}>
             {unknown ? `No reconocido · núm. ${r.employee_no ?? '—'}` : r.person_name}
           </span>
         </div>
-        <div className="t-small ellipsis">{r.role_label} · {r.location_name}{r.source === 'manual' && r.manual_reason ? ` · ${r.manual_reason}` : ''}</div>
-        {(overdue || r.source === 'manual' || r.source === 'simulator' || unknown) && (
-          <div className="hstack wrap" style={{ marginTop: 6, gap: 6 }}>
+        <div className="t-small ellipsis">
+          {r.role_label} · {r.location_name}
+          {voided ? ` · Anulada${r.voided_by_name ? ` por ${r.voided_by_name}` : ''}: ${r.void_reason ?? ''}` : r.source === 'manual' && r.manual_reason ? ` · ${r.manual_reason}` : ''}
+        </div>
+        {(overdue || r.source === 'manual' || r.source === 'simulator' || unknown || voided || canVoid) && (
+          <div className="hstack wrap" style={{ marginTop: 6, gap: 6, alignItems: 'center' }}>
+            {voided && <Badge>Anulada</Badge>}
             {overdue && <Badge tone="red">Membresía vencida</Badge>}
             {r.source === 'manual' && <Badge tone="gold">Manual</Badge>}
             {r.source === 'simulator' && <Badge>Simulada</Badge>}
             {unknown && <Badge tone="red">No reconocido</Badge>}
+            {canVoid && <button type="button" className="btn-link dim" style={{ fontSize: 12 }} onClick={onVoid}>Anular</button>}
           </div>
         )}
       </div>
       <div style={{ textAlign: 'right', flex: 'none' }}>
-        <div style={{ font: '600 13px/1 var(--f-mono)' }}>{fmtTime(r.occurred_at)}</div>
+        <div style={{ font: '600 13px/1 var(--f-mono)', textDecoration: voided ? 'line-through' : undefined }}>{fmtTime(r.occurred_at)}</div>
         <div style={{ marginTop: 3, font: '600 10px/1 var(--f-mono)', letterSpacing: '.12em', color: 'var(--ink-4)' }}>{r.direction === 'in' ? 'ENTRADA' : 'SALIDA'}</div>
       </div>
     </div>
+  );
+}
+
+/** HUE-18 · Anular una lectura con motivo obligatorio; queda tachada y en la bitácora. */
+function VoidSheet({ item, onClose, onDone }: { item: Attendance | null; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (item) { setReason(''); setError(null); } }, [item]);
+  const go = async () => {
+    if (!item) return;
+    if (reason.trim().length < 3) { setError('Escribe el motivo de la anulación.'); return; }
+    setSaving(true);
+    try {
+      await api.del(`/api/attendance/${item.id}`, { reason: reason.trim() });
+      toast('Asistencia anulada');
+      onDone();
+    } catch (e) {
+      setError((e as ApiError).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Sheet open={!!item} onClose={onClose} title="Anular asistencia"
+      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="danger" loading={saving} onClick={go}>Anular</Button></>}>
+      {item && (
+        <div className="stack md">
+          <div className="t-body">
+            <b>{item.person_name}</b> · {fmtDate(item.occurred_at)} {fmtTime(item.occurred_at)} · {item.direction === 'in' ? 'entrada' : 'salida'}
+          </div>
+          <Notice tone="gold">
+            La lectura no se borra: queda tachada con tu nombre y el motivo. Deja de contar para horas, sesiones y citas; si había descontado una sesión del paquete, se devuelve.
+          </Notice>
+          <Field label="Motivo" error={error ?? undefined}>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} placeholder="Por ejemplo: puso el dedo dos veces seguidas" />
+          </Field>
+        </div>
+      )}
+    </Sheet>
   );
 }
 

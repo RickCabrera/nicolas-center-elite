@@ -43,7 +43,7 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
       (select count(*)::int from patients p join patient_billing b on b.patient_id = p.id
         where p.status = 'active' and b.state in ('por_vencer', 'vencido') ${pLoc}) as due,
       (select count(*)::int from attendance_events e
-        where mx_date(e.occurred_at) = ${today}::date and e.person_type <> 'unknown' ${attLoc}) as attendance_today`;
+        where mx_date(e.occurred_at) = ${today}::date and e.person_type <> 'unknown' and e.voided_at is null ${attLoc}) as attendance_today`;
 
   const appts = await db<{ id: string; starts_at: Date; patient_id: string; patient_name: string; type_name: string; therapist: string; status: 'scheduled' | 'attended' | 'no_show' }[]>`
     select a.id, a.starts_at, a.patient_id, p.full_name as patient_name, a.type_name,
@@ -59,7 +59,7 @@ export const GET = route({ auth: 'user', query: Query }, async ({ db, user, quer
            case e.person_type when 'patient' then 'Paciente'
              else case su.role when 'owner' then 'Dirección' when 'reception' then 'Recepción' else 'Fisioterapeuta' end end as role_label
     from attendance_events e join locations l on l.id = e.location_id left join users su on su.id = e.user_id
-    where mx_date(e.occurred_at) = ${today}::date and e.person_type <> 'unknown' ${attLoc}
+    where mx_date(e.occurred_at) = ${today}::date and e.person_type <> 'unknown' and e.voided_at is null ${attLoc}
     order by e.occurred_at desc limit 5`;
 
   // Los pagos son del dueño y de recepción: el fisioterapeuta recibe solo el conteo de SUS pacientes, sin el detalle.

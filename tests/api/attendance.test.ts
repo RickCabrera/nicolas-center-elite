@@ -17,6 +17,7 @@ import { PATCH as DEVICE_PATCH } from '@/app/api/devices/[id]/route';
 import { GET as SECRETS, POST as SECRETS_ROTATE } from '@/app/api/devices/[id]/secrets/route';
 import { POST as COMMAND } from '@/app/api/devices/[id]/command/route';
 import { GET as ATT_LIST, POST as ATT_MANUAL } from '@/app/api/attendance/route';
+import { DELETE as ATT_VOID } from '@/app/api/attendance/[id]/route';
 import { POST as SIMULATE } from '@/app/api/attendance/simulate/route';
 import { GET as REPORT } from '@/app/api/attendance/report/route';
 import { GET as STATUS } from '@/app/api/attendance/status/route';
@@ -838,7 +839,8 @@ describe('HUE-12 · reporte', () => {
     expect(r.status).toBe(200);
     const karla = r.data.staff.find((s: any) => s.user_id === fx.therapistA.id);
     expect(karla).toMatchObject({ person_name: 'L.F.T. Karla Ocampo', location_name: 'Córdoba', total_minutes: 360, incomplete_days: 1 });
-    expect(karla.days).toEqual([{ date: day, first_in: '08:00', last_out: '14:00', minutes: 360, pairs: 1, incomplete: true }]);
+    expect(karla.days).toEqual([{ date: day, first_in: '08:00', last_out: '14:00', minutes: 360, pairs: 1, incomplete: true,
+      intervals: [{ in: '08:00', out: '14:00', minutes: 360 }, { in: '15:00', out: null, minutes: 0 }] }]);
     expect(karla.weeks).toHaveLength(1);
     expect(karla.weeks[0].minutes).toBe(360);
     const ana = r.data.patients.find((p: any) => p.patient_id === fx.patientA1);
@@ -862,8 +864,8 @@ describe('HUE-12 · reporte', () => {
     const bytes = new Uint8Array(await r.res.arrayBuffer());
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const text = new TextDecoder().decode(bytes);
-    expect(text).toContain('Persona,Sede,Fecha,Primera entrada,Última salida,Horas trabajadas,Minutos,Estado');
-    expect(text).toMatch(/L\.F\.T\. Karla Ocampo,Córdoba,\d{2}\/\d{2}\/\d{4},08:00,19:30,10:30,630,Completo/);
+    expect(text).toContain('Persona,Sede,Fecha,Primera entrada,Última salida,Tramos (entrada-salida),Horas trabajadas,Minutos,Estado');
+    expect(text).toMatch(/L\.F\.T\. Karla Ocampo,Córdoba,\d{2}\/\d{2}\/\d{4},08:00,19:30,08:00-14:00 | 15:00-19:30,10:30,630,Completo/);
     expect(text).toContain('Ana Prueba Uno');
     const log = await sqlSystem((tx) => tx`select 1 from audit_log where action = 'export' and table_name = 'attendance_events'`);
     expect(log.length).toBe(1);
@@ -935,5 +937,72 @@ describe('lector real · personas existentes y registro en la pantalla del lecto
     // Un número ya tomado no se puede vincular a otra persona.
     const dup = await call(LINK, { as: fx.owner, params: { id: dev.id }, body: { employee_no: '1', person_type: 'patient', person_id: fx.patientA1 } });
     expect(dup.status).toBe(409);
+  });
+});
+
+describe('HUE-18 · anular una lectura', () => {
+  const d = addDays(todayIso(), -4);
+  it('dueño: la lectura queda tachada con motivo y autor, deja de contar para entrada/salida y horas, y va a la bitácora', async () => {
+    const no = emp[fx.therapistA.id];
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('08:00', d) }), 'application/json');
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('08:05', d) }), 'application/json'); // dedo dos veces (salida falsa)
+    const ev = await events(`where user_id = '${fx.therapistA.id}' and mx_date(occurred_at) = '${d}'`);
+    expect(ev.map((e) => e.direction)).toEqual(['in', 'out']);
+
+    expect((await call(ATT_VOID, { as: fx.therapistA, params: { id: ev[1].id }, body: { reason: 'doble lectura' } })).status).toBe(403);
+    expect((await call(ATT_VOID, { as: fx.owner, params: { id: ev[1].id }, body: { reason: 'x' } })).status).toBe(400); // motivo obligatorio
+    const r = await call(ATT_VOID, { as: fx.owner, params: { id: ev[1].id }, body: { reason: 'Puso el dedo dos veces seguidas' } });
+    expect(r.status).toBe(200);
+    expect(r.data).toMatchObject({ id: ev[1].id, void_reason: 'Puso el dedo dos veces seguidas', voided_by_name: expect.stringContaining('Nicolas') });
+    expect(r.data.voided_at).toBeTruthy();
+    // Idempotente.
+    expect((await call(ATT_VOID, { as: fx.owner, params: { id: ev[1].id }, body: { reason: 'otra vez' } })).data.void_reason).toBe('Puso el dedo dos veces seguidas');
+
+    // La siguiente lectura es lo contrario de la última NO anulada (la entrada de 08:00) → salida.
+    await hook(dev.webhook, accessJson({ employeeNo: no, time: at('14:00', d) }), 'application/json');
+    const after = await events(`where user_id = '${fx.therapistA.id}' and mx_date(occurred_at) = '${d}' and voided_at is null`);
+    expect(after.map((e) => e.direction)).toEqual(['in', 'out']);
+
+    // Reporte: 6 h del par 08:00→14:00; la anulada no aparece.
+    const rep = await call(REPORT, { as: fx.owner, url: `/api/attendance/report?from=${d}&to=${d}` });
+    const karla = rep.data.staff.find((s: any) => s.user_id === fx.therapistA.id);
+    expect(karla.days[0]).toMatchObject({ minutes: 360, incomplete: false, intervals: [{ in: '08:00', out: '14:00', minutes: 360 }] });
+
+    // Lista: sigue visible, marcada como anulada.
+    const list = await call(ATT_LIST, { as: fx.owner, url: `/api/attendance?date=${d}&user_id=${fx.therapistA.id}` });
+    const row = list.data.items.find((x: any) => x.id === ev[1].id);
+    expect(row.voided_at).toBeTruthy();
+
+    const log = await sqlSystem((tx) => tx`select summary, actor_id from audit_log where table_name = 'attendance_events' and row_id = ${ev[1].id}`);
+    expect(log).toHaveLength(1);
+    expect(log[0].summary).toContain('Anuló la asistencia');
+    expect(log[0].actor_id).toBe(fx.owner.id);
+  });
+
+  it('paciente con paquete: anular devuelve la sesión y regresa la cita a programada', async () => {
+    const when = at('10:00', d);
+    const [appt] = await sqlSystem((tx) => tx`
+      insert into appointments (patient_id, therapist_id, location_id, starts_at, duration_min, ends_at, type_name)
+      values (${fx.patientA2}, ${fx.therapistA.id}, ${fx.cordoba}, ${at('10:30', d)}, 50, ${at('11:20', d)}, 'Fisioterapia') returning id`);
+    const [before] = await sqlSystem((tx) => tx`select sessions_remaining from memberships where patient_id = ${fx.patientA2}`);
+    await hook(dev.webhook, accessJson({ employeeNo: emp[fx.patientA2], time: when, serialNo: 9001 }), 'application/json');
+    const [ev] = await events(`where patient_id = '${fx.patientA2}' and mx_date(occurred_at) = '${d}'`);
+    expect(ev.session_consumed).toBe(true);
+    expect(ev.appointment_id).toBe(appt.id);
+    const [mid] = await sqlSystem((tx) => tx`select sessions_remaining from memberships where patient_id = ${fx.patientA2}`);
+    expect(mid.sessions_remaining).toBe(before.sessions_remaining - 1);
+
+    const r = await call(ATT_VOID, { as: fx.owner, params: { id: ev.id }, body: { reason: 'Se reconoció a la persona equivocada' } });
+    expect(r.status).toBe(200);
+    const [after] = await sqlSystem((tx) => tx`select sessions_remaining from memberships where patient_id = ${fx.patientA2}`);
+    expect(after.sessions_remaining).toBe(before.sessions_remaining);
+    const [a] = await sqlSystem((tx) => tx`select status, attended_at from appointments where id = ${appt.id}`);
+    expect(a).toMatchObject({ status: 'scheduled', attended_at: null });
+    const [row] = await sqlSystem((tx) => tx`select session_consumed from attendance_events where id = ${ev.id}`);
+    expect(row.session_consumed).toBe(false);
+    // Una nueva lectura ese día vuelve a descontar (la anulada ya no bloquea el "máximo una por día").
+    await hook(dev.webhook, accessJson({ employeeNo: emp[fx.patientA2], time: at('12:00', d), serialNo: 9002 }), 'application/json');
+    const [again] = await sqlSystem((tx) => tx`select sessions_remaining from memberships where patient_id = ${fx.patientA2}`);
+    expect(again.sessions_remaining).toBe(before.sessions_remaining - 1);
   });
 });

@@ -48,7 +48,9 @@ asistió / no asistió, abrir el expediente o escribir la nota de esa sesión. S
 lector cerca de su hora, la cita se marca sola como "Asistió". **Mi horario** define tus horas y bloqueos.
 
 **Control de huella**: asistencias de hoy de tu sede, en vivo. "Registro manual" (con motivo) cuando el lector
-falle. Una fila roja "MEMBRESÍA VENCIDA" es un aviso para recepción; no bloquea la entrada.
+falle. Una fila roja "MEMBRESÍA VENCIDA" es un aviso para recepción; no bloquea la entrada. La entrada/salida del
+personal la decide el sistema: cada lectura es lo contrario de la anterior del día; los pacientes solo registran
+asistencias. En Reportes, cada día muestra sus tramos entrada → salida y las horas son la suma de esos tramos.
 
 ## Recepción
 
@@ -75,8 +77,10 @@ Pacientes, Agenda, Mensualidades, Control de huella y Mi perfil.
   o cambiar el plan, pausar y reanudar, y ver el historial con sus recibos. Anular un pago, reembolsar, resolver un
   pago "en revisión", facturar y la pestaña Ingresos son del dueño.
 - **Control de huella**: asistencias en vivo de todas las sedes y estado del lector. "Registro manual" (con motivo)
-  para cualquier paciente. Registrar o volver a registrar la huella de un paciente se hace desde su ficha. Los
-  reportes de horas del personal y la configuración de lectores son del dueño.
+  para cualquier paciente, y "Anular" (con motivo) una lectura de paciente que no debió contar (puso el dedo dos
+  veces, se reconoció a la persona equivocada): queda tachada, no se borra, y si había descontado una sesión del
+  paquete se devuelve. Registrar o volver a registrar la huella o el rostro de un paciente se hace desde su ficha.
+  Los reportes de horas del personal, anular lecturas del personal y la configuración de lectores son del dueño.
 - **Mi perfil**: sus datos, contraseña, acceso con huella del dispositivo (passkeys), sesiones abiertas y su
   huella en el lector para registrar entrada y salida.
 

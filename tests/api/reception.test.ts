@@ -9,6 +9,7 @@ import { GET as apptsGET, POST as apptsPOST } from '@/app/api/appointments/route
 import { GET as arcoGET } from '@/app/api/arco/route';
 import { GET as attReportGET } from '@/app/api/attendance/report/route';
 import { GET as attGET, POST as attPOST } from '@/app/api/attendance/route';
+import { DELETE as attVOID } from '@/app/api/attendance/[id]/route';
 import { GET as attStatusGET } from '@/app/api/attendance/status/route';
 import { GET as auditGET } from '@/app/api/audit/route';
 import { GET as membershipGET, PATCH as membershipPATCH } from '@/app/api/billing/memberships/[patientId]/route';
@@ -330,6 +331,14 @@ describe('AUTH-10 · recepción: huella e inicio', () => {
     expect(list.status).toBe(200);
     expect(list.data.items.map((e: { id: string }) => e.id)).toContain(r.data.id);
     expect((await call(attStatusGET, { as: rec })).status).toBe(200);
+
+    // HUE-18 · Puede anular lecturas de pacientes, no las del personal.
+    const v = await call(attVOID, { as: rec, params: { id: r.data.id }, body: { reason: 'Registro duplicado' } });
+    expect(v.status).toBe(200);
+    expect(v.data).toMatchObject({ void_reason: 'Registro duplicado', voided_by_name: 'Rocío Morales' });
+    const staffEv = await call(attPOST, { as: fx.owner, body: { person_type: 'staff', person_id: fx.therapistA.id, reason: 'Olvidó registrar' } });
+    expect(staffEv.status).toBe(200);
+    expect((await call(attVOID, { as: rec, params: { id: staffEv.data.id }, body: { reason: 'No es de recepción' } })).status).toBe(403);
 
     expect((await call(attPOST, { as: rec, body: { person_type: 'staff', person_id: fx.therapistA.id, reason: 'Olvidó registrar' } })).status).toBe(403);
     expect((await call(attGET, { as: rec, url: `/x?user_id=${fx.therapistA.id}` })).status).toBe(403);

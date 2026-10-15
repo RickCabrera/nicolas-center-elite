@@ -22,7 +22,7 @@ export const GET = route({ auth: 'owner', query: Query }, async ({ query, system
              coalesce(a.today, 0) as appointments_today, coalesce(a.week, 0) as appointments_week,
              coalesce(a.attended, 0) as attended_week, coalesce(a.no_show, 0) as no_show_week,
              (select count(distinct mx_date(e.occurred_at))::int from attendance_events e
-               where e.user_id = u.id and e.direction = 'in'
+               where e.user_id = u.id and e.direction = 'in' and e.voided_at is null
                  and mx_date(e.occurred_at) between ${from}::date and ${to}::date) as attendance_days_week,
              (select count(*)::int from evolution_notes n
                where n.author_id = u.id and mx_date(n.noted_at) between ${from}::date and ${to}::date) as notes_week

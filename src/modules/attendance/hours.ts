@@ -9,12 +9,16 @@ import { addDays, fmtTime, isoDate, weekday } from '@/lib/dates';
 
 export type Reading = { occurred_at: Date | string; direction: 'in' | 'out' };
 
+/** Un tramo del día: entrada y su salida ('HH:MM'); `out` null = entrada que quedó sin salida (no suma). */
+export type Interval = { in: string; out: string | null; minutes: number };
+
 export type DayHours = {
   first_in: string | null;   // 'HH:MM' local
   last_out: string | null;   // 'HH:MM' local
   minutes: number;
   pairs: number;
   incomplete: boolean;
+  intervals: Interval[];
 };
 
 export function dayHours(readings: Reading[]): DayHours {
@@ -24,24 +28,27 @@ export function dayHours(readings: Reading[]): DayHours {
   let open: Date | null = null;
   let minutes = 0, pairs = 0, incomplete = false;
   let firstIn: Date | null = null, lastOut: Date | null = null;
+  const intervals: Interval[] = [];
   for (const r of list) {
     if (r.direction === 'in') {
-      if (open) incomplete = true; // dos entradas seguidas: la anterior quedó sin salida
+      if (open) { incomplete = true; intervals.push({ in: fmtTime(open), out: null, minutes: 0 }); } // dos entradas seguidas: la anterior quedó sin salida
       open = r.at;
       firstIn ??= r.at;
     } else {
       if (!open) { incomplete = true; continue; }
-      minutes += Math.max(0, Math.round((r.at.getTime() - open.getTime()) / 60000));
+      const m = Math.max(0, Math.round((r.at.getTime() - open.getTime()) / 60000));
+      minutes += m;
       pairs++;
+      intervals.push({ in: fmtTime(open), out: fmtTime(r.at), minutes: m });
       lastOut = r.at;
       open = null;
     }
   }
-  if (open) incomplete = true;
+  if (open) { incomplete = true; intervals.push({ in: fmtTime(open), out: null, minutes: 0 }); }
   return {
     first_in: firstIn ? fmtTime(firstIn) : null,
     last_out: lastOut ? fmtTime(lastOut) : null,
-    minutes, pairs, incomplete,
+    minutes, pairs, incomplete, intervals,
   };
 }
 

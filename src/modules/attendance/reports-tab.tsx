@@ -114,14 +114,22 @@ export function ReportsTab() {
                   <h4 className="t-label" style={{ margin: '18px 0 8px' }}>Detalle por día</h4>
                   <div className="table-wrap">
                     <table className="table">
-                      <thead><tr><th>Persona</th><th>Fecha</th><th className="num">Primera entrada</th><th className="num">Última salida</th><th className="num">Horas</th><th>Estado</th></tr></thead>
+                      <thead><tr><th>Persona</th><th>Fecha</th><th>Tramos (entrada → salida)</th><th className="num">Horas</th><th>Estado</th></tr></thead>
                       <tbody>
                         {data.staff.flatMap((s) => s.days.map((d) => (
                           <tr key={s.user_id + d.date}>
                             <td style={{ whiteSpace: 'nowrap' }}>{s.person_name}</td>
                             <td style={{ whiteSpace: 'nowrap' }}>{weekdayShort(weekday(d.date))} {fmtDate(d.date)}</td>
-                            <td className="num">{d.first_in ?? '—'}</td>
-                            <td className="num">{d.last_out ?? '—'}</td>
+                            <td>
+                              <div className="hstack wrap" style={{ gap: 6 }}>
+                                {d.intervals.map((t, i) => (
+                                  <span key={i} className="t-mono" title={t.out ? `${fmtMinutes(t.minutes)} h` : 'Entrada sin salida: no suma'}
+                                    style={{ fontSize: 12, padding: '3px 8px', borderRadius: 8, border: '1px solid rgba(255,255,255,.14)', color: t.out ? undefined : 'var(--gold)', whiteSpace: 'nowrap' }}>
+                                    {t.in} → {t.out ?? 'sin salida'}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
                             <td className="num">{fmtMinutes(d.minutes)}</td>
                             <td>{d.incomplete ? <span className="badge gold">Incompleto</span> : <span className="badge green">Completo</span>}</td>
                           </tr>

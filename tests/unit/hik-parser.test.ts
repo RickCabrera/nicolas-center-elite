@@ -120,17 +120,19 @@ describe('HUE-12 · horas trabajadas (función pura)', () => {
 
   it('suma los pares entrada→salida', () => {
     const d = dayHours([r('08:00', 'in'), r('14:00', 'out'), r('15:00', 'in'), r('18:30', 'out')]);
-    expect(d).toEqual({ first_in: '08:00', last_out: '18:30', minutes: 570, pairs: 2, incomplete: false });
+    expect(d).toEqual({ first_in: '08:00', last_out: '18:30', minutes: 570, pairs: 2, incomplete: false,
+      intervals: [{ in: '08:00', out: '14:00', minutes: 360 }, { in: '15:00', out: '18:30', minutes: 210 }] });
     expect(fmtMinutes(d.minutes)).toBe('9:30');
   });
 
   it('entrada sin salida: incompleto y no suma', () => {
-    expect(dayHours([r('08:00', 'in')])).toEqual({ first_in: '08:00', last_out: null, minutes: 0, pairs: 0, incomplete: true });
+    expect(dayHours([r('08:00', 'in')])).toEqual({ first_in: '08:00', last_out: null, minutes: 0, pairs: 0, incomplete: true, intervals: [{ in: '08:00', out: null, minutes: 0 }] });
   });
 
   it('par cerrado + entrada abierta: cuenta el par y marca incompleto', () => {
     const d = dayHours([r('15:00', 'in'), r('08:00', 'in'), r('14:00', 'out')]); // desordenadas a propósito
-    expect(d).toMatchObject({ minutes: 360, pairs: 1, incomplete: true, first_in: '08:00', last_out: '14:00' });
+    expect(d).toMatchObject({ minutes: 360, pairs: 1, incomplete: true, first_in: '08:00', last_out: '14:00',
+      intervals: [{ in: '08:00', out: '14:00', minutes: 360 }, { in: '15:00', out: null, minutes: 0 }] });
   });
 
   it('salida sin entrada se ignora y marca incompleto; día vacío no es incompleto', () => {

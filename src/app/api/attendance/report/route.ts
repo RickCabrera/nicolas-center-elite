@@ -37,7 +37,7 @@ export const GET = route({ auth: 'owner', query: Query }, async ({ db, query }) 
     join users u on u.id = e.user_id
     join locations l on l.id = e.location_id
     left join locations ul on ul.id = u.location_id
-    where e.person_type = 'staff' and mx_date(e.occurred_at) between ${from}::date and ${to}::date ${loc}
+    where e.person_type = 'staff' and e.voided_at is null and mx_date(e.occurred_at) between ${from}::date and ${to}::date ${loc}
     order by e.occurred_at`;
   const staff = buildStaffReport(readings);
 
@@ -49,7 +49,7 @@ export const GET = route({ auth: 'owner', query: Query }, async ({ db, query }) 
     from attendance_events e
     join patients p on p.id = e.patient_id
     join locations l on l.id = p.location_id
-    where e.person_type = 'patient' and mx_date(e.occurred_at) between ${from}::date and ${to}::date ${loc}
+    where e.person_type = 'patient' and e.voided_at is null and mx_date(e.occurred_at) between ${from}::date and ${to}::date ${loc}
     group by e.patient_id, p.full_name, p.record_number, l.name
     order by visits desc, p.full_name`;
 
@@ -69,10 +69,11 @@ export const GET = route({ auth: 'owner', query: Query }, async ({ db, query }) 
   lines.push(csvLine(['Reporte de asistencia', `${fmtDate(from)} a ${fmtDate(to)}`]));
   lines.push('');
   lines.push(csvLine(['PERSONAL · HORAS POR DÍA']));
-  lines.push(csvLine(['Persona', 'Sede', 'Fecha', 'Primera entrada', 'Última salida', 'Horas trabajadas', 'Minutos', 'Estado']));
+  lines.push(csvLine(['Persona', 'Sede', 'Fecha', 'Primera entrada', 'Última salida', 'Tramos (entrada-salida)', 'Horas trabajadas', 'Minutos', 'Estado']));
   for (const s of staff) {
     for (const d of s.days) {
-      lines.push(csvLine([s.person_name, s.location_name, fmtDate(d.date), d.first_in ?? '', d.last_out ?? '', fmtMinutes(d.minutes), d.minutes, d.incomplete ? 'Incompleto' : 'Completo']));
+      const tramos = d.intervals.map((t) => `${t.in}-${t.out ?? 'sin salida'}`).join(' | ');
+      lines.push(csvLine([s.person_name, s.location_name, fmtDate(d.date), d.first_in ?? '', d.last_out ?? '', tramos, fmtMinutes(d.minutes), d.minutes, d.incomplete ? 'Incompleto' : 'Completo']));
     }
   }
   lines.push('');
