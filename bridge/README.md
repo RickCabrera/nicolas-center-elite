@@ -112,6 +112,9 @@ internet.
    página web del lector → **Configuration → Time and Attendance → Attendance Mode → Disable** (o en la pantalla:
    *Menú → T&A Status → Modo → Desactivado*). La app decide entrada/salida sola: para el personal, cada lectura
    es lo contrario de la anterior del día; para pacientes, cada lectura es una asistencia.
+8. Hora del lector: tras un apagón el equipo pierde el reloj. El agente lo pone en hora solo en cuanto lo ve
+   desfasado (más de 60 s). Como doble seguro, activa NTP en el lector: **Configuration → System → Time Settings →
+   NTP** (Enable, servidor `pool.ntp.org`, zona UTC-06:00).
 
 Para desinstalar: `powershell -ExecutionPolicy Bypass -File .\install-windows.ps1 -Uninstall`.
 

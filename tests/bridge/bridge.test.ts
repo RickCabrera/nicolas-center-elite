@@ -620,6 +620,29 @@ describe('lector real · guardado de la huella en dos tiempos', () => {
   });
 });
 
+describe('apagón · el lector pierde la hora', () => {
+  it('con el reloj del lector desfasado, el agente lo pone en hora solo al arrancar', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD });
+    device.state.clockOffsetMs = -3 * 3600 * 1000; // el lector cree que son 3 horas antes
+    writeConfig();
+    const r = await runBridge('--once');
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/se puso en hora automáticamente/);
+    expect(Math.abs(device.state.clockOffsetMs)).toBeLessThan(5000);
+  });
+
+  it('auto_sync_time: false solo avisa', async () => {
+    await device.close();
+    device = await startMockDevice({ password: PASSWORD });
+    device.state.clockOffsetMs = -3 * 3600 * 1000;
+    writeConfig({ auto_sync_time: false });
+    const r = await runBridge('--once');
+    expect(r.out).toMatch(/Usa "Sincronizar hora"/);
+    expect(Math.abs(device.state.clockOffsetMs)).toBeGreaterThan(3600 * 1000);
+  });
+});
+
 describe('HUE-17 · rostro', () => {
   const noFaceLeak = (text: string) => {
     expect(text).not.toMatch(/faceData|faceURL|face_?url|image/i);

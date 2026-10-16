@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '1.2.1';
+export const VERSION = '1.2.2';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // ───────────────────────── utilidades ─────────────────────────
@@ -724,6 +724,7 @@ export function loadConfig(file) {
     delete_poll_ms: Number(cfg.delete_poll_ms) || 1000,
     device_enroll_timeout_seconds: Number(cfg.device_enroll_timeout_seconds) || 240,
     device_enroll_poll_ms: Number(cfg.device_enroll_poll_ms) || 4000,
+    auto_sync_time: cfg.auto_sync_time !== false,
   };
 }
 
@@ -853,7 +854,18 @@ export class Bridge {
         const skew = await this.device.clockSkewSeconds();
         if (skew !== null) {
           this.skewSeconds = skew;
-          if (Math.abs(skew) > 60) this.log(`Aviso: el reloj del lector difiere ${skew} s del de esta PC. Usa "Sincronizar hora" en Configuración.`);
+          // Tras un apagón el lector pierde la hora y sus lecturas salen con fecha equivocada: se corrige aquí mismo.
+          if (Math.abs(skew) > 60 && this.config.auto_sync_time) {
+            try {
+              await this.device.syncTime(this.config.timezone);
+              this.log(`El reloj del lector iba ${skew} s desfasado (probable apagón); se puso en hora automáticamente.`);
+              this.skewSeconds = 0;
+            } catch (e) {
+              this.log(`Aviso: el reloj del lector difiere ${skew} s y no se pudo corregir (${e?.code ?? e?.message}). Usa "Sincronizar hora" en Configuración.`);
+            }
+          } else if (Math.abs(skew) > 60) {
+            this.log(`Aviso: el reloj del lector difiere ${skew} s del de esta PC. Usa "Sincronizar hora" en Configuración.`);
+          }
         }
       } catch { /* no todos los firmwares exponen la hora */ }
     }
