@@ -3,9 +3,13 @@ import { z } from 'zod';
 /** HUE-01 / CFG-04 · Datos editables de un lector. La contraseña solo viaja hacia el servidor. */
 const host = z.string().trim().max(120).regex(/^[A-Za-z0-9.\-:]*$/, 'Escribe solo la IP o el nombre del lector, sin http://.');
 
+export const DeviceKindSchema = z.enum(['hikvision', 'usb_digitalpersona']);
+
 export const DeviceCreate = z.object({
   name: z.string().trim().min(1, 'Escribe un nombre para el lector.').max(80),
   location_id: z.uuid('Selecciona la sede.'),
+  /** Hikvision en red (por defecto) o sensor USB DigitalPersona en la PC de recepción (HUE-20). */
+  kind: DeviceKindSchema.default('hikvision'),
   model: z.string().trim().max(80).default(''),
   serial: z.string().trim().max(80).default(''),
   host: host.default(''),

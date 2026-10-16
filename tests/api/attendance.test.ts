@@ -12,6 +12,7 @@ import { POST as POLL } from '@/app/api/bridge/poll/route';
 import { POST as RESULT } from '@/app/api/bridge/result/route';
 import { POST as BRIDGE_EVENTS } from '@/app/api/bridge/events/route';
 import { POST as HEARTBEAT } from '@/app/api/bridge/heartbeat/route';
+import { POST as PROGRESS } from '@/app/api/bridge/progress/route';
 import { GET as DEVICES, POST as DEVICE_CREATE } from '@/app/api/devices/route';
 import { PATCH as DEVICE_PATCH } from '@/app/api/devices/[id]/route';
 import { GET as SECRETS, POST as SECRETS_ROTATE } from '@/app/api/devices/[id]/secrets/route';
@@ -1028,5 +1029,72 @@ describe('HUE-18 · anular una lectura', () => {
     await hook(dev.webhook, accessJson({ employeeNo: emp[fx.patientA2], time: at('12:00', d), serialNo: 9002 }), 'application/json');
     const [again] = await sqlSystem((tx) => tx`select sessions_remaining from memberships where patient_id = ${fx.patientA2}`);
     expect(again.sessions_remaining).toBe(before.sessions_remaining - 1);
+  });
+});
+
+describe('HUE-20 · lector USB DigitalPersona', () => {
+  it('se da de alta sin IP ni contraseña, la nube le dice al agente que es USB y el Hikvision sigue igual', async () => {
+    const usb = await createDevice('USB Córdoba', fx.cordoba, { kind: 'usb_digitalpersona', host: '10.0.0.9', password: 'no-se-guarda' });
+    try {
+      expect(usb.row).toMatchObject({ kind: 'usb_digitalpersona', model: 'DigitalPersona U.are.U 4500', host: '', has_password: false });
+      expect(usb.secrets.kind).toBe('usb_digitalpersona');
+      const list = (await call(DEVICES, { as: fx.owner })).data;
+      expect(list.find((d: any) => d.id === dev.id).kind).toBe('hikvision');
+      const p = await call(POLL, { headers: bearer(usb.bridge), body: { version: '1.3.0', device_reachable: true, device_info: { model: 'DigitalPersona U.are.U 4500', serial: 'UU4500X' } } });
+      expect(p.status).toBe(200);
+      expect(p.data.config).toMatchObject({ kind: 'usb_digitalpersona', host: '', password: '' });
+      const ph = await call(POLL, { headers: bearer(dev.bridge), body: { version: '1.3.0' } });
+      expect(ph.data.config).toMatchObject({ kind: 'hikvision', host: '192.168.80.212', password: 'Secreta123' });
+      // Editar no cambia el tipo ni le pone IP.
+      const e = await call(DEVICE_PATCH, { as: fx.owner, params: { id: usb.id }, body: { name: 'USB recepción' } });
+      expect(e.data).toMatchObject({ name: 'USB recepción', kind: 'usb_digitalpersona', host: '' });
+    } finally {
+      await sqlSystem((tx) => tx`delete from devices where id = ${usb.id}`);
+    }
+  });
+
+  it('solo huella: el rostro se rechaza; la huella se encola, avisa los toques y el resultado la marca', async () => {
+    await signBiometric(fx.patientA1, fx.therapistA);
+    const usb = await createDevice('USB Córdoba', fx.cordoba, { kind: 'usb_digitalpersona' });
+    try {
+      const face = await call(ENROLL, { as: fx.therapistA, body: { person_type: 'patient', person_id: fx.patientA1, method: 'face', device_id: usb.id } });
+      expect(face.status).toBe(409);
+      expect(face.error?.code).toBe('face_not_supported');
+      const info = await call(ENROLL_INFO, { as: fx.therapistA, url: `/api/enrollments?person_type=patient&person_id=${fx.patientA1}` });
+      expect(info.data.devices.find((d: any) => d.id === usb.id)).toMatchObject({ kind: 'usb_digitalpersona' });
+
+      const r = await call(ENROLL, { as: fx.therapistA, body: { person_type: 'patient', person_id: fx.patientA1, device_id: usb.id } });
+      expect(r.status).toBe(200);
+      const p = await call(POLL, { headers: bearer(usb.bridge), body: { version: '1.3.0' } });
+      expect(p.data.commands).toEqual([expect.objectContaining({ kind: 'enroll_fingerprint', payload: expect.objectContaining({ employee_no: emp[fx.patientA1] }) })]);
+      const pr = await call(PROGRESS, { headers: bearer(usb.bridge), body: { command_id: r.data.command_id, stage: 'capturing', sample: 2, samples: 4 } });
+      expect(pr.status).toBe(200);
+      const st = await call(COMMAND_STATUS, { as: fx.therapistA, params: { commandId: r.data.command_id } });
+      expect(st.data.progress).toEqual({ stage: 'capturing', employee_no: null, sample: 2, samples: 4 });
+      const done = await call(RESULT, { headers: bearer(usb.bridge), body: { command_id: r.data.command_id, ok: true, result: { mode: 'remote', finger_no: 1, quality: null } } });
+      expect(done.status).toBe(200);
+      const [e] = await sqlSystem((tx) => tx`select status, enrolled_at from enrollments where device_id = ${usb.id}`);
+      expect(e).toMatchObject({ status: 'enrolled' });
+      expect(e.enrolled_at).toBeTruthy();
+    } finally {
+      await sqlSystem((tx) => tx`delete from devices where id = ${usb.id}`);
+    }
+  });
+
+  it('las checadas del agente USB entran por el mismo camino (huella verificada 38, sin número de serie)', async () => {
+    const usb = await createDevice('USB Córdoba', fx.cordoba, { kind: 'usb_digitalpersona' });
+    try {
+      const t = new Date(Date.now() - 60000);
+      const ev = { employee_no: emp[fx.therapistA.id], time: iso(t), serial_no: null, major: 5, minor: 38, verify_mode: 'fingerPrint' };
+      const r = await call(BRIDGE_EVENTS, { headers: bearer(usb.bridge), body: { events: [ev, ev] } });
+      expect(r.status).toBe(200);
+      expect(r.data).toMatchObject({ received: 2, created: 1 });
+      const rows = await events(`where device_id = '${usb.id}'`);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ person_type: 'staff', user_id: fx.therapistA.id, source: 'bridge', verify_mode: 'fingerPrint' });
+      await sqlSystem((tx) => tx`delete from attendance_events where device_id = ${usb.id}`);
+    } finally {
+      await sqlSystem((tx) => tx`delete from devices where id = ${usb.id}`);
+    }
   });
 });

@@ -37,6 +37,7 @@ esta versión.
 | Confidencialidad de archivos | Bucket privado; URLs firmadas de 5 minutos, solo tras verificar acceso; cada apertura se registra | `tests/api/studies.test.ts` · EST-01 |
 | Cifrado | HTTPS en tránsito (Vercel); cifrado en reposo del proveedor (Supabase); credenciales del lector cifradas con AES-256-GCM | `src/lib/crypto.ts` |
 | Datos biométricos | La huella vive solo en el lector; el sistema guarda un número de persona; el agente rechaza y nunca envía la plantilla | `tests/db/schema.test.ts` · HUE-16; `tests/bridge/bridge.test.ts`; `tests/api/attendance.test.ts` |
+| Datos biométricos con lector USB (HUE-20) | El sensor USB DigitalPersona no tiene memoria: las plantillas viven cifradas con AES-256-GCM en la PC donde está conectado (`vault-*.enc`, llave en `vault.key`), con permisos solo del usuario del agente; nunca se envían a la nube; borrar a la persona del lector las elimina de la bóveda. Práctica conforme a ISO/IEC 24745 (protección de plantillas) y al trato de datos sensibles de la LFPDPPP. La llave se respalda aparte, bajo llave | `tests/bridge/usb.test.ts` |
 | Disponibilidad y respaldo | Respaldos del proveedor + respaldo propio con prueba de restauración | `docs/respaldos.md`; `pnpm backup:check` |
 | Exportación e intercambio | Expediente completo en ZIP (JSON + archivos); respaldo general en CSV | `tests/api/settings.test.ts` · CFG-10 |
 | Secretos fuera del código | Variables de entorno validadas; escaneo de secretos en CI (gitleaks) | `.github/workflows/ci.yml` |

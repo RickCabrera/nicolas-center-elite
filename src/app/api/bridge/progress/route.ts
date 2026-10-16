@@ -10,6 +10,9 @@ const Body = z.object({
   command_id: z.uuid(),
   stage: z.enum(['capturing', 'on_device']),
   employee_no: z.string().max(64).optional(),
+  /** Lector USB: toque n de m al registrar la huella (HUE-20). */
+  sample: z.number().int().min(1).max(20).optional(),
+  samples: z.number().int().min(1).max(20).optional(),
 });
 
 /**
@@ -21,7 +24,7 @@ export const POST = route({ auth: 'public', body: Body }, async ({ req, db, body
   const device = await deviceByBridgeToken(db, req);
   const rows = await db`
     update device_commands
-       set result = coalesce(result, '{}'::jsonb) || ${db.json({ stage: body.stage, ...(body.employee_no ? { employee_no: body.employee_no } : {}) })},
+       set result = coalesce(result, '{}'::jsonb) || ${db.json({ stage: body.stage, ...(body.employee_no ? { employee_no: body.employee_no } : {}), ...(body.sample ? { sample: body.sample, samples: body.samples ?? null } : {}) })},
            started_at = now()
      where id = ${body.command_id} and device_id = ${device.id} and status = 'running'
      returning id`;

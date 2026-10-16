@@ -31,7 +31,7 @@ type Cmd = { id: string; kind: string; payload: Record<string, unknown>; created
 export const POST = route({ auth: 'public', body: Body }, async ({ req, db, body }) => {
   const device = await deviceByBridgeToken(db, req);
   const info = body.device_info ?? {};
-  const [d] = await db<{ host: string; port: number; use_https: boolean; username: string; password_enc: string | null; last_event_at: Date | null }[]>`
+  const [d] = await db<{ kind: string; host: string; port: number; use_https: boolean; username: string; password_enc: string | null; last_event_at: Date | null }[]>`
     update devices set
       bridge_seen_at = now(),
       bridge_version = ${body.version || null},
@@ -41,7 +41,7 @@ export const POST = route({ auth: 'public', body: Body }, async ({ req, db, body
       serial = case when ${info.serial ?? ''} <> '' then ${info.serial ?? ''} else serial end,
       firmware = case when ${info.firmware ?? ''} <> '' then ${info.firmware ?? ''} else firmware end
     where id = ${device.id}
-    returning host, port, use_https, username, password_enc, last_event_at`;
+    returning kind, host, port, use_https, username, password_enc, last_event_at`;
 
   if (body.device_reachable === false && body.device_error) {
     await db`update devices set last_error = ${translateDeviceError(body.device_error)} where id = ${device.id}`;
@@ -63,6 +63,8 @@ export const POST = route({ auth: 'public', body: Body }, async ({ req, db, body
   return {
     commands: [...commands].sort((a, b) => a.created_at.getTime() - b.created_at.getTime()).map(({ id, kind, payload }) => ({ id, kind, payload })),
     config: {
+      // El tipo decide el chofer en el agente (HUE-20): 'hikvision' en red o 'usb_digitalpersona' en la PC.
+      kind: d.kind,
       host: d.host, port: d.port, use_https: d.use_https, username: d.username, password,
       poll_seconds: 2,
       backfill_since: d.last_event_at,

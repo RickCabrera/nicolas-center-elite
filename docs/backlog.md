@@ -13,6 +13,12 @@ La matriz de qué archivo y qué prueba cubre cada tarea está en `docs/trazabil
 | --- | --- | --- |
 | AUTH-10 | Rol "Recepción" (`reception`) | Quien atiende el mostrador opera lo administrativo de todos los pacientes de todas las sedes (alta y datos de contacto, firmas del alta, agenda de todos los fisioterapeutas, mensualidades y cobro en línea, asistencia y huella de pacientes) y nunca ve información clínica: las rutas clínicas le responden 403 y RLS no le entrega filas. Anular pagos, reembolsos, facturación, ingresos, Equipo, Configuración y auditoría siguen siendo del dueño. El dueño invita y desactiva cuentas de recepción desde Equipo |
 
+## Ampliación aprobada después del backlog: lector USB DigitalPersona
+
+| ID | Tarea | Terminado cuando |
+| --- | --- | --- |
+| HUE-20 | Lector USB DigitalPersona U.are.U 4500 como segundo tipo de lector | El dueño agrega un lector "USB DigitalPersona" (sin IP ni contraseña) junto al Hikvision, que no cambia. El agente puente detecta el tipo y usa su chofer USB: registra la huella con 4 toques (avance visible en la app, duplicados rechazados), guarda las plantillas cifradas solo en la PC, identifica en vivo y envía cada checada por el mismo camino que el Hikvision (cola local sin internet, recuperar eventos, `--check` y `--probe --usb`). Con lector USB la app no ofrece rostro. Pendiente: validar con el equipo real (`bridge/README.md`) |
+
 ## Ampliación aprobada después del backlog: cobro en línea y facturación
 
 | ID | Tarea | Terminado cuando |

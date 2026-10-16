@@ -13,8 +13,13 @@ import { AppError, forbidden, notFound } from '@/lib/errors';
 import { dedupeKey, isVerifiedAccess, type HikEvent } from './hik-parser';
 
 // ───────── lectores ─────────
+/** Tipo de lector (HUE-20): Hikvision en red o sensor USB DigitalPersona en la PC de recepción. */
+export type DeviceKind = 'hikvision' | 'usb_digitalpersona';
+export const USB_KIND: DeviceKind = 'usb_digitalpersona';
+export const USB_MODEL = 'DigitalPersona U.are.U 4500';
+
 export type DeviceRow = {
-  id: string; name: string; location_id: string; location_name: string;
+  id: string; name: string; location_id: string; location_name: string; kind: DeviceKind;
   model: string; serial: string; firmware: string;
   host: string; port: number; use_https: boolean; username: string; has_password: boolean;
   active: boolean;
@@ -31,7 +36,7 @@ export type DeviceRow = {
  */
 export async function listDevices(tx: Tx, opts: { id?: string; locationId?: string | null; onlyActive?: boolean } = {}): Promise<DeviceRow[]> {
   return tx<DeviceRow[]>`
-    select d.id, d.name, d.location_id, l.name as location_name, d.model, d.serial, d.firmware,
+    select d.id, d.name, d.location_id, l.name as location_name, d.kind, d.model, d.serial, d.firmware,
            d.host, d.port, d.use_https, d.username, (d.password_enc is not null) as has_password, d.active,
            (coalesce(greatest(d.last_webhook_at, d.last_event_at) > now() - interval '3 minutes', false)
              or coalesce(d.device_reachable and d.device_checked_at > now() - interval '2 minutes', false)) as online,
@@ -46,12 +51,12 @@ export async function listDevices(tx: Tx, opts: { id?: string; locationId?: stri
     order by d.active desc, l.name, d.name`;
 }
 
-export type AuthDevice = { id: string; name: string; location_id: string };
+export type AuthDevice = { id: string; name: string; location_id: string; kind: DeviceKind };
 
 /** Webhook: el lector se identifica por el hash del token de su URL. */
 export async function deviceByWebhookToken(tx: Tx, token: string | undefined): Promise<AuthDevice | null> {
   if (!token || token.length < 16 || token.length > 200) return null;
-  const [d] = await tx<AuthDevice[]>`select id, name, location_id from devices where webhook_token_hash = ${sha256(token)} and active`;
+  const [d] = await tx<AuthDevice[]>`select id, name, location_id, kind from devices where webhook_token_hash = ${sha256(token)} and active`;
   return d ?? null;
 }
 
@@ -59,14 +64,14 @@ export async function deviceByWebhookToken(tx: Tx, token: string | undefined): P
 export async function deviceByBridgeToken(tx: Tx, req: NextRequest): Promise<AuthDevice> {
   const h = req.headers.get('authorization') ?? '';
   const m = h.match(/^Bearer\s+(\S{16,200})$/i);
-  const [d] = m ? await tx<AuthDevice[]>`select id, name, location_id from devices where bridge_token_hash = ${sha256(m[1])} and active` : [];
+  const [d] = m ? await tx<AuthDevice[]>`select id, name, location_id, kind from devices where bridge_token_hash = ${sha256(m[1])} and active` : [];
   if (!d) throw new AppError(401, 'unauthorized', 'Token del agente puente inválido.');
   return d;
 }
 
 // ───────── datos de conexión ─────────
 /** URL del webhook y valores exactos a capturar en el lector (Configuration → Network → HTTP Listening). */
-export function connectionData(webhookToken: string, bridgeToken: string, others: { name: string; bridge_token: string }[] = [], ownName = '') {
+export function connectionData(webhookToken: string, bridgeToken: string, others: { name: string; bridge_token: string }[] = [], ownName = '', kind: DeviceKind = 'hikvision') {
   const base = env().APP_URL.replace(/\/+$/, '');
   // Varios lectores atendidos por la misma PC: un solo config.json con la lista (el agente corre un ciclo por lector).
   const readers = [{ name: ownName, bridge_token: bridgeToken }, ...others];
@@ -76,6 +81,7 @@ export function connectionData(webhookToken: string, bridgeToken: string, others
   const path = `${u.pathname.replace(/\/+$/, '')}/api/hik/events/${webhookToken}`;
   const bridge_config = { cloud_url: base, bridge_token: bridgeToken };
   return {
+    kind,
     webhook_url: `${base}/api/hik/events/${webhookToken}`,
     listener: {
       protocol: https ? 'HTTPS' : 'HTTP',
@@ -296,6 +302,13 @@ export const DEVICE_ERRORS: Record<string, string> = {
   device_busy: 'El lector está ocupado. Espera unos segundos e intenta de nuevo.',
   device_full: 'El lector ya no tiene espacio para más personas o huellas.',
   not_supported: 'El lector no admite esta operación con su firmware actual.',
+  // Lector USB DigitalPersona (HUE-20)
+  usb_no_reader: 'No hay un lector USB DigitalPersona conectado a la PC de recepción. Conéctalo y revisa que Windows lo reconozca.',
+  usb_lib_missing: 'En la PC de recepción faltan las librerías del fabricante (DigitalPersona U.are.U RTE). Revisa bridge/README.md.',
+  usb_koffi_missing: 'En la PC de recepción falta instalar el módulo del lector USB: ejecuta "npm install" en la carpeta bridge.',
+  usb_capture_failed: 'El lector USB no pudo capturar la huella. Limpia el sensor e intenta de nuevo.',
+  usb_match_failed: 'El motor de huellas de la PC de recepción falló al comparar. Reinicia el agente puente.',
+  vault_error: 'La bóveda de huellas de la PC de recepción no se pudo abrir. Revisa el agente puente (node bridge.mjs --check).',
   face_capture_failed: 'El lector no pudo capturar el rostro. La persona debe mirar de frente a la cámara; intenta de nuevo.',
   face_low_quality: 'El lector no detectó bien el rostro. Acércate, mira de frente y sin cubrebocas, e intenta de nuevo.',
   face_setup_failed: 'El lector capturó el rostro pero no pudo guardarlo. Intenta de nuevo.',

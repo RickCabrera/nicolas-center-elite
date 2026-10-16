@@ -149,6 +149,64 @@ Si un evento llega por las dos vías (webhook y agente), la app lo registra una 
 | Calidad baja | Limpiar el sensor y el dedo; volver a registrar. |
 | Las asistencias no llegan | Ver `logs\agente.log`. Si el agente está bien pero no hay webhook, llegan cada 15 s por el historial. |
 
+## Lector USB DigitalPersona U.are.U 4500 (opcional, además del Hikvision)
+
+Algunas clínicas usan un lector USB **DigitalPersona U.are.U 4500** en lugar (o además) del Hikvision. Ese lector
+es solo un sensor: no guarda huellas, no compara y no tiene reloj. Por eso el mismo agente hace ese trabajo en la
+PC donde está conectado. Todo lo del Hikvision sigue igual; esto es un tipo de lector aparte.
+
+**Cómo funciona, con bolitas y palitos:**
+
+- En la app: **Configuración → Lectores → + Agregar lector → Tipo: USB DigitalPersona**. No pide IP ni contraseña.
+- Registrar huella: el mismo botón de siempre; el paciente pone **el mismo dedo 4 veces** (la pantalla dice "toque 1
+  de 4…"). No hay rostro con este lector.
+- Checadas: el agente deja el lector esperando dedos todo el tiempo; al reconocer una huella manda la asistencia a
+  la app en segundos (aparece en Control de huella igual que con el Hikvision).
+- **Privacidad:** las plantillas se guardan cifradas (AES-256-GCM) en `vault-<lector>.enc`, con su llave en
+  `vault.key`, en esta misma carpeta. Nunca se envían a la app. Es la práctica estándar para lectores USB (el
+  lector no tiene memoria) y equivale a "la huella vive en el lector" del Hikvision.
+- Si la PC está apagada o el agente detenido, **nadie puede checar** con este lector (usar Registro manual).
+- Sin internet, las checadas se guardan en `readings-<lector>.json` y se envían al volver.
+
+### Instalación en la PC del lector USB
+
+1. **Driver y librerías del fabricante.** Instalar el **DigitalPersona U.are.U RTE** (deja `dpfpdd.dll` y `dpfj.dll`
+   en `C:\Program Files\DigitalPersona\U.are.U RTE\Windows\Lib\x64`). Si la clínica ya usa el lector con otro
+   programa, casi seguro ya está instalado: revisar esa carpeta. Se obtiene con el SDK del portal de desarrolladores
+   de HID (las librerías de ejecución son redistribuibles). El driver solo del 4500 ("Non-WBF / Legacy") se baja
+   gratis de hidglobal.com, pero **no** trae las dos librerías.
+2. Copiar esta carpeta `bridge` a la PC y, dentro de ella, ejecutar una sola vez:
+   ```
+   npm install
+   ```
+   (instala `koffi`, el puente entre Node y las librerías; el Hikvision no lo necesita).
+3. Probar el lector sin la app (pide poner el mismo dedo dos veces; no guarda nada):
+   ```
+   node bridge.mjs --probe --usb
+   ```
+   Si las librerías están en otra carpeta: `node bridge.mjs --probe --usb --lib-dir "C:\ruta\Lib\x64"`.
+4. En la app, **Datos de conexión** del lector USB → descargar `config.json` a esta carpeta. Si las librerías están
+   en otra carpeta, agregar al `config.json`:
+   ```json
+   "device": { "type": "usb", "lib_dir": "C:\\ruta\\Lib\\x64" }
+   ```
+5. `node bridge.mjs --check` (debe decir "Lector conectado" y "Bóveda abierta") e instalar como siempre con
+   `install-windows.ps1`.
+
+**Respaldo:** copiar `vault.key` y `vault-*.enc` a una USB guardada bajo llave. Sin `vault.key` la bóveda no se
+puede abrir y habría que registrar las huellas otra vez. Para pasar el lector a otra PC basta copiar esos dos archivos.
+
+**Un lector Hikvision y uno USB en la misma PC:** sí se puede, con el `config.json` de "varios lectores" (cada uno
+con su token); el agente usa el chofer correcto para cada uno.
+
+| Síntoma (lector USB) | Qué revisar |
+| --- | --- |
+| `--check`: "Falta el módulo koffi" | Ejecutar `npm install` dentro de la carpeta `bridge`. |
+| `--check`: "No se encontraron las librerías" | Instalar el U.are.U RTE o poner `lib_dir` en `config.json`. |
+| `--check`: "No hay un lector conectado" | Cable USB; luz azul encendida; que Windows lo muestre en el Administrador de dispositivos. Cerrar otros programas que estén usando el lector. |
+| "Calidad baja" al registrar | Limpiar el sensor (cinta adhesiva suave) y el dedo; apoyar el dedo plano, sin presionar de más. |
+| "Esa huella ya está registrada a nombre de otra persona" | Igual que en el Hikvision: una huella, una persona. |
+
 ## Pruebas
 
 `mock-device.mjs` simula el lector (Digest, alta de persona, captura de huella y de rostro, registro en pantalla,
@@ -158,6 +216,10 @@ del agente corren contra él:
 ```
 npx vitest run -c vitest.bridge.config.ts
 ```
+
+`usb-mock.mjs` simula el sensor USB DigitalPersona (un "dedo" es un texto; mismo dedo = misma plantilla) y
+`tests/bridge/usb.test.ts` prueba el chofer USB completo: bóveda cifrada, registro con 4 toques, duplicados,
+checadas en vivo, cola sin internet, recuperar eventos y `--check`.
 
 ## Pendiente de validar en el equipo real
 
@@ -177,3 +239,14 @@ confirman en 5 minutos estas piezas con el DS-K1T321EFWX-B de la clínica:
 4. `PUT /ISAPI/Event/notification/httpHosts/1` para configurar el webhook desde la app.
 5. La zona horaria que reporta el lector en `AcsEvent` (la app asume hora de México cuando no trae zona).
 6. Que el certificado HTTPS del lector sea autofirmado (el agente lo acepta solo para la IP del lector).
+
+### Lector USB DigitalPersona (pendiente: todo se probó contra el simulador)
+
+Las firmas de `dpfpdd`/`dpfj` y los tamaños de las estructuras se tomaron de `dpfpdd.h`/`dpfj.h` (SDK 2.x/3.x,
+vía el proyecto MIT `uareu-node`) y se verificaron con `koffi` (`DPFPDD_DEV_INFO` = 1452 bytes). Con el lector real
+y `node bridge.mjs --probe --usb` hay que confirmar:
+
+1. Que `dpfpdd_query_devices` lista el 4500 y `dpfpdd_open_ext` lo abre en modo cooperativo.
+2. Que la captura a 500 dpi en formato ANSI 381 da plantillas y que dos toques del mismo dedo coinciden.
+3. Que `dpfj_identify` con la tasa 1/100,000 reconoce bien a la persona entre varias (y no confunde dedos).
+4. Que `dpfpdd_cancel` corta la espera de dedo para pasar de "checar" a "registrar" sin trabarse.

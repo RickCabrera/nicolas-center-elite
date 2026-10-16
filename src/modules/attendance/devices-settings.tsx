@@ -9,6 +9,10 @@ import type { CommandStatus, Device, DeviceSecrets } from './types';
 import { waitForCommand } from './use-command';
 
 const DEFAULT_MODEL = 'DS-K1T321EFWX-B';
+/** HUE-20 · Lector USB DigitalPersona conectado a la PC de recepción (sin IP, sin rostro). */
+const USB_KIND = 'usb_digitalpersona';
+const USB_MODEL = 'DigitalPersona U.are.U 4500';
+const isUsb = (d: { kind?: string } | null | undefined) => d?.kind === USB_KIND;
 type Kind = 'ping' | 'sync_time' | 'backfill_events' | 'configure_listener';
 type Activity = { tone?: 'green' | 'gold' | 'red'; text: string };
 
@@ -143,12 +147,14 @@ export function DevicesSettings(_props: Record<string, never> = {}) {
                     <KV label="Modelo">{d.model || '—'}</KV>
                     <KV label="Serie">{d.serial || '—'}</KV>
                     <KV label="Firmware">{d.firmware || '—'}</KV>
-                    <KV label="Dirección en la red">{d.host ? `${d.use_https ? 'https' : 'http'}://${d.host}:${d.port}` : 'Sin capturar'}</KV>
+                    {isUsb(d)
+                      ? <KV label="Conexión">USB en la PC de recepción</KV>
+                      : <KV label="Dirección en la red">{d.host ? `${d.use_https ? 'https' : 'http'}://${d.host}:${d.port}` : 'Sin capturar'}</KV>}
                     <KV label="Última lectura">{when(d.last_event_at)}</KV>
                     <KV label="Última sincronización">{when(d.last_sync_at)}</KV>
                   </div>
 
-                  {(!d.host || !d.has_password) && (
+                  {!isUsb(d) && (!d.host || !d.has_password) && (
                     <Notice tone="gold">Falta capturar {!d.host ? 'la dirección' : 'la contraseña'} del lector. Sin eso el agente puente no puede registrar huellas ni recuperar eventos.</Notice>
                   )}
                   {d.last_error && !a && <Notice tone="red">{d.last_error}</Notice>}
@@ -156,7 +162,7 @@ export function DevicesSettings(_props: Record<string, never> = {}) {
 
                   <div className="hstack wrap">
                     <Button size="sm" loading={b === 'ping'} disabled={!!b} onClick={() => run(d, 'ping')}>Probar conexión</Button>
-                    <Button size="sm" loading={b === 'sync_time'} disabled={!!b} onClick={() => run(d, 'sync_time')}>Sincronizar hora</Button>
+                    {!isUsb(d) && <Button size="sm" loading={b === 'sync_time'} disabled={!!b} onClick={() => run(d, 'sync_time')}>Sincronizar hora</Button>}
                     <Button size="sm" loading={b === 'backfill_events'} disabled={!!b} onClick={() => setBackfillFor(d)}>Recuperar eventos</Button>
                     <Button size="sm" onClick={() => setPersonsFor(d)}>Personas en el lector</Button>
                     <Button size="sm" onClick={() => setSecretsFor(d)}>Datos de conexión</Button>
@@ -200,8 +206,8 @@ export function DevicesSettings(_props: Record<string, never> = {}) {
 }
 
 // ───────── alta / edición ─────────
-type FormValues = { name: string; location_id: string; model: string; serial: string; host: string; port: string; use_https: boolean; username: string; password: string };
-const emptyForm: FormValues = { name: '', location_id: '', model: DEFAULT_MODEL, serial: '', host: '', port: '', use_https: true, username: 'admin', password: '' };
+type FormValues = { name: string; location_id: string; kind: string; model: string; serial: string; host: string; port: string; use_https: boolean; username: string; password: string };
+const emptyForm: FormValues = { name: '', location_id: '', kind: 'hikvision', model: DEFAULT_MODEL, serial: '', host: '', port: '', use_https: true, username: 'admin', password: '' };
 
 function DeviceSheet({ state, onClose, onSaved }: { state: { device: Device | null } | null; onClose: () => void; onSaved: (d: Device, created: boolean) => void }) {
   const { meta } = useMeta();
@@ -216,7 +222,7 @@ function DeviceSheet({ state, onClose, onSaved }: { state: { device: Device | nu
     if (!state) return;
     setFailure(null);
     f.reset(device
-      ? { name: device.name, location_id: device.location_id, model: device.model, serial: device.serial, host: device.host, port: String(device.port), use_https: device.use_https, username: device.username, password: '' }
+      ? { name: device.name, location_id: device.location_id, kind: device.kind, model: device.model, serial: device.serial, host: device.host, port: String(device.port), use_https: device.use_https, username: device.username, password: '' }
       : { ...emptyForm, name: 'Lector de recepción' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
@@ -226,16 +232,20 @@ function DeviceSheet({ state, onClose, onSaved }: { state: { device: Device | nu
     const errors: Record<string, string> = {};
     if (!v.name.trim()) errors.name = 'Escribe un nombre para el lector.';
     if (!v.location_id) errors.location_id = 'Selecciona la sede.';
-    if (v.port && !/^\d{1,5}$/.test(v.port.trim())) errors.port = 'Puerto inválido.';
+    const usb = v.kind === USB_KIND;
+    if (!usb && v.port && !/^\d{1,5}$/.test(v.port.trim())) errors.port = 'Puerto inválido.';
     if (Object.keys(errors).length) { f.setErrors(errors); return; }
     setSaving(true);
     setFailure(null);
-    const body: Record<string, unknown> = {
-      name: v.name, location_id: v.location_id, model: v.model, serial: v.serial, host: v.host.trim(),
-      use_https: v.use_https, username: v.username || 'admin',
-      port: v.port.trim() ? Number(v.port) : v.use_https ? 443 : 80,
-    };
-    if (v.password) body.password = v.password;
+    // El lector USB no tiene IP, usuario ni contraseña: solo nombre, sede y tipo (HUE-20). El tipo se fija al crearlo.
+    const body: Record<string, unknown> = usb
+      ? { name: v.name, location_id: v.location_id, model: v.model || USB_MODEL, serial: v.serial, ...(device ? {} : { kind: USB_KIND }) }
+      : {
+        name: v.name, location_id: v.location_id, model: v.model, serial: v.serial, host: v.host.trim(),
+        use_https: v.use_https, username: v.username || 'admin',
+        port: v.port.trim() ? Number(v.port) : v.use_https ? 443 : 80,
+      };
+    if (!usb && v.password) body.password = v.password;
     try {
       const saved = device ? await api.patch<Device>(`/api/devices/${device.id}`, body) : await api.post<Device>('/api/devices', body);
       toast(device ? 'Lector actualizado' : 'Lector agregado');
@@ -261,9 +271,25 @@ function DeviceSheet({ state, onClose, onSaved }: { state: { device: Device | nu
               {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </Select>
           </Field>
-          <Field label="Modelo" error={f.errors.model}><Input {...f.bind('model')} placeholder={DEFAULT_MODEL} maxLength={80} /></Field>
+          <Field label="Tipo de lector" hint={device ? 'El tipo no se cambia; si hace falta, da de alta otro lector.' : undefined}>
+            {device ? (
+              <Input value={f.values.kind === USB_KIND ? 'USB DigitalPersona (PC de recepción)' : 'Hikvision en red'} readOnly />
+            ) : (
+              <Select value={f.values.kind} onChange={(e) => { const k = e.target.value; f.set('kind', k); f.set('model', k === USB_KIND ? USB_MODEL : DEFAULT_MODEL); }}>
+                <option value="hikvision">Hikvision en red (con IP)</option>
+                <option value={USB_KIND}>USB DigitalPersona, conectado a la PC de recepción</option>
+              </Select>
+            )}
+          </Field>
+          <Field label="Modelo" error={f.errors.model}><Input {...f.bind('model')} placeholder={f.values.kind === USB_KIND ? USB_MODEL : DEFAULT_MODEL} maxLength={80} /></Field>
           <Field label="Número de serie" error={f.errors.serial} hint="Opcional: se llena solo al probar la conexión."><Input {...f.bind('serial')} maxLength={80} /></Field>
         </div>
+        {f.values.kind === USB_KIND ? (
+          <div className="t-small">
+            El lector USB no tiene dirección ni contraseña: el agente puente de la PC donde está conectado habla con él directamente.
+            Solo lee huellas (no rostro) y las guarda cifradas en esa PC; checa únicamente mientras la PC y el agente están encendidos.
+          </div>
+        ) : (<>
         <div className="t-label" style={{ marginTop: 4 }}>Acceso al lector en la red de la clínica</div>
         <div className="grid-form">
           <Field label="IP o nombre del lector" error={f.errors.host} hint="Por ejemplo 192.168.80.212 (sin http://)."><Input {...f.bind('host')} placeholder="192.168.80.212" inputMode="url" autoCapitalize="none" autoCorrect="off" maxLength={120} /></Field>
@@ -277,6 +303,7 @@ function DeviceSheet({ state, onClose, onSaved }: { state: { device: Device | nu
         <div className="t-small">
           La contraseña se guarda cifrada y solo se entrega al agente puente de la PC de recepción, que es quien habla con el lector.
         </div>
+        </>)}
         {failure && <Notice tone="red">{failure}</Notice>}
         <button type="submit" hidden />
       </form>
@@ -370,10 +397,18 @@ function SecretsSheet({ device, onClose, onConfigure }: { device: Device | null;
 
             <section className="stack md">
               <h4 className="t-h3 blue">1. Agente puente (PC de recepción)</h4>
-              <div className="t-small">
-                Guarda este contenido como <b>config.json</b> dentro de la carpeta <b>bridge</b> en la PC de recepción y corre <span className="t-mono">node bridge.mjs --check</span>.
-                El agente registra huellas, sincroniza la hora y recupera asistencias aunque el aviso del lector falle.
-              </div>
+              {data.kind === USB_KIND ? (
+                <div className="t-small">
+                  Guarda este contenido como <b>config.json</b> dentro de la carpeta <b>bridge</b> en la PC donde está conectado el lector USB,
+                  ejecuta <span className="t-mono">npm install</span> en esa carpeta (una sola vez) y luego <span className="t-mono">node bridge.mjs --check</span>.
+                  El agente lee las huellas, las compara en esa PC y envía cada checada a la app; las huellas quedan cifradas ahí y nunca salen.
+                </div>
+              ) : (
+                <div className="t-small">
+                  Guarda este contenido como <b>config.json</b> dentro de la carpeta <b>bridge</b> en la PC de recepción y corre <span className="t-mono">node bridge.mjs --check</span>.
+                  El agente registra huellas, sincroniza la hora y recupera asistencias aunque el aviso del lector falle.
+                </div>
+              )}
               <pre style={{ margin: 0, padding: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,.14)', background: 'rgba(0,0,0,.35)', font: '500 12.5px/1.5 var(--f-mono)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'all' }}>{data.bridge_config_json}</pre>
               <div className="hstack wrap">
                 <Button size="sm" variant="primary" onClick={async () => toast((await copyText(data.bridge_config_json)) ? 'config.json copiado' : 'No se pudo copiar; selecciónalo a mano')}>Copiar</Button>
@@ -394,6 +429,17 @@ function SecretsSheet({ device, onClose, onConfigure }: { device: Device | null;
               )}
             </section>
 
+            {data.kind === USB_KIND ? (
+              <section className="stack md">
+                <h4 className="t-h3 blue">2. Librerías del fabricante</h4>
+                <div className="t-small">
+                  En esa PC debe estar instalado el <b>DigitalPersona U.are.U RTE</b> (deja <span className="t-mono">dpfpdd.dll</span> y <span className="t-mono">dpfj.dll</span> en
+                  <span className="t-mono"> C:\Program Files\DigitalPersona\U.are.U RTE\Windows\Lib\x64</span>). Si están en otra carpeta, indícala en config.json:
+                  <span className="t-mono"> &quot;device&quot;: {'{'} &quot;type&quot;: &quot;usb&quot;, &quot;lib_dir&quot;: &quot;C:\\…\\Lib\\x64&quot; {'}'}</span>.
+                  Para probar el lector sin la app: <span className="t-mono">node bridge.mjs --probe --usb</span>. Detalles en <b>bridge/README.md</b>.
+                </div>
+              </section>
+            ) : (
             <section className="stack md">
               <h4 className="t-h3 blue">2. Aviso de eventos del lector (HTTP Listening)</h4>
               <div className="t-small">
@@ -412,6 +458,7 @@ function SecretsSheet({ device, onClose, onConfigure }: { device: Device | null;
               </div>
               {!device?.bridge_online && <div className="t-small">La configuración automática requiere el agente puente conectado. Mientras tanto puedes capturar los valores a mano.</div>}
             </section>
+            )}
           </div>
         )}
       <Confirm open={!!regen} onClose={() => setRegen(null)} onConfirm={rotate} danger

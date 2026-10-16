@@ -38,7 +38,11 @@ export const GET = route({ auth: 'user' }, async ({ params, user, system }) => {
     result: c.status === 'done' ? result : null,
     // Avance de una orden larga (por ejemplo, la huella se está registrando en la pantalla del lector).
     progress: c.status === 'running' && typeof result.stage === 'string'
-      ? { stage: result.stage, employee_no: typeof result.employee_no === 'string' ? result.employee_no : null } : null,
+      ? {
+        stage: result.stage, employee_no: typeof result.employee_no === 'string' ? result.employee_no : null,
+        // Lector USB: toque n de m (HUE-20).
+        ...(typeof result.sample === 'number' ? { sample: result.sample, samples: typeof result.samples === 'number' ? result.samples : null } : {}),
+      } : null,
     device_id: c.device_id, device_name: c.device_name, bridge_online: c.bridge_online,
     created_at: c.created_at, started_at: c.started_at, finished_at: c.finished_at,
   };

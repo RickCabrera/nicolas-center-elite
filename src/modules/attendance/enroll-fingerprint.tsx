@@ -9,7 +9,7 @@ import type { EnrollInfo } from './types';
 import { waitForCommand } from './use-command';
 
 type Method = 'fingerprint' | 'face';
-type Scan = { method: Method; commandId: string; deviceName: string; bridgeOnline: boolean; started: boolean; onDevice: string | null };
+type Scan = { method: Method; commandId: string; deviceName: string; bridgeOnline: boolean; started: boolean; onDevice: string | null; sample: [number, number] | null };
 const WORD: Record<Method, { what: string; action: string; done: string; prompt: string; onDevice: string }> = {
   fingerprint: { what: 'huella', action: 'Registrar huella', done: 'Huella registrada', prompt: 'Coloca el dedo en el lector', onDevice: 'Huella (Fingerprint) → coloca el dedo las veces que pida' },
   face: { what: 'rostro', action: 'Registrar rostro', done: 'Rostro registrado', prompt: 'Mira de frente a la cámara del lector', onDevice: 'Rostro (Face) → mira a la cámara hasta que confirme' },
@@ -58,7 +58,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
       const chosen = deviceId || info.data?.device?.id || info.data?.devices?.[0]?.id;
       const r = await api.post<{ command_id: string; device_name: string; bridge_online: boolean }>('/api/enrollments', { person_type: personType, person_id: personId, method, ...(chosen ? { device_id: chosen } : {}) });
       if (!alive.current) return;
-      setScan({ method, commandId: r.command_id, deviceName: r.device_name, bridgeOnline: r.bridge_online, started: false, onDevice: null });
+      setScan({ method, commandId: r.command_id, deviceName: r.device_name, bridgeOnline: r.bridge_online, started: false, onDevice: null, sample: null });
       setStarting(false);
       const res = await waitForCommand(r.command_id, {
         // Hasta 5 min: si el lector no captura a distancia, se registra en su pantalla y eso toma más.
@@ -66,6 +66,8 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
         onTick: (c) => alive.current && setScan((s) => (s ? {
           ...s, bridgeOnline: c.bridge_online, started: c.status === 'running',
           onDevice: c.progress?.stage === 'on_device' ? (c.progress.employee_no ?? '') : s.onDevice,
+          // Lector USB: varios toques del mismo dedo (HUE-20).
+          sample: c.progress?.sample ? [c.progress.sample, c.progress.samples ?? 4] : s.sample,
         } : s)),
       });
       if (!alive.current || res.outcome === 'aborted') return;
@@ -145,6 +147,8 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
   const noDevice = !!info.data && !info.data.device && devices.length === 0;
   const showPicker = devices.length > 1;
   const selected = deviceId || info.data?.device?.id || devices[0]?.id || '';
+  // El sensor USB solo lee huellas: con él elegido no se ofrece el rostro (HUE-20).
+  const selectedUsb = (devices.find((d) => d.id === selected) ?? info.data?.device)?.kind === 'usb_digitalpersona';
 
   return (
     <div className="stack sm" style={{ minWidth: 0 }}>
@@ -175,7 +179,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
           <button type="button" className="btn-link" onClick={() => start('face')} disabled={starting || !!scan}>Volver a registrar rostro</button>
           {!enrolled && <button type="button" className="btn-link dim" onClick={() => setConfirmRemove(true)} disabled={removing}>Eliminar del lector</button>}
         </div>
-      ) : (
+      ) : selectedUsb ? null : (
         <Button block onClick={() => start('face')} loading={starting && scan?.method === 'face'} disabled={!!scan || !!noDevice} style={{ minHeight: 44, gap: 10 }}>
           Registrar rostro
         </Button>
@@ -186,7 +190,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
           Lector
           <Select value={selected} onChange={(e) => setDeviceId(e.target.value)} disabled={!!scan} style={{ flex: 1, minWidth: 0 }}>
             {devices.map((d) => (
-              <option key={d.id} value={d.id}>{d.name} · {d.location_name}{d.bridge_online ? '' : ' (agente desconectado)'}</option>
+              <option key={d.id} value={d.id}>{d.name} · {d.location_name}{d.kind === 'usb_digitalpersona' ? ' · USB' : ''}{d.bridge_online ? '' : ' (agente desconectado)'}</option>
             ))}
           </Select>
         </label>
@@ -207,6 +211,7 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
         <ScanOverlay
           title={scan.onDevice !== null ? `Registra ${WORD[scan.method].what === 'rostro' ? 'el rostro' : 'la huella'} en el lector` : `Registrando ${WORD[scan.method].what}`}
           sub={scan.onDevice !== null ? `Este lector no permite capturar desde la app`
+            : scan.sample ? `Toque ${scan.sample[0]} de ${scan.sample[1]} listo · levanta el dedo y vuelve a ponerlo en ${scan.deviceName}`
             : scan.bridgeOnline || scan.started ? `${WORD[scan.method].prompt} de ${scan.deviceName}` : `Esperando al lector de ${scan.deviceName}`}
           onCancel={scan.bridgeOnline || scan.started ? () => closeScan(!scan.started) : undefined}
         >

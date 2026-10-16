@@ -19,6 +19,8 @@
  *                              modelo, capacidades, personas, huellas y eventos; genera probe-report.json
  *   node bridge.mjs --probe-enroll
  *                              prueba completa con una persona temporal: alta, huella, lectura de check-in y baja
+ *   node bridge.mjs --probe --usb
+ *                              prueba del lector USB DigitalPersona U.are.U conectado a esta PC (ver usb-device.mjs)
  *   Opciones: --config <ruta a config.json>   --state <ruta a state.json>
  *             --host <ip> --user <usuario> --pass <contraseña> [--http]   (para --probe sin config.json)
  */
@@ -29,8 +31,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const VERSION = '1.2.2';
+export const VERSION = '1.3.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Lector USB DigitalPersona (HUE-20): el chofer vive en usb-device.mjs y se carga solo cuando hace falta,
+ * así este archivo sigue funcionando solo (sin dependencias) para el Hikvision.
+ */
+const USB_KIND = 'usb_digitalpersona';
+const USB_MODEL_LABEL = 'DigitalPersona U.are.U 4500';
+async function loadUsbModule() {
+  return import('./usb-device.mjs');
+}
 
 // ───────────────────────── utilidades ─────────────────────────
 const pad = (n) => String(n).padStart(2, '0');
@@ -596,13 +608,14 @@ export class HikDevice {
  * Devuelve únicamente calidad y número de dedo: nada biométrico.
  */
 export async function enrollFingerprint(device, { employee_no, name, finger_no = 1 }, {
-  captureTimeoutMs = 45000, onWaiting, onDeviceMode, deviceModeTimeoutMs = 240000, pollMs = 4000,
+  captureTimeoutMs = 45000, onWaiting, onDeviceMode, onSample, deviceModeTimeoutMs = 240000, pollMs = 4000,
 } = {}) {
   await device.upsertPerson(employee_no, name);
   onWaiting?.();
   let capture;
   try {
-    capture = await device.captureFingerprint(finger_no, captureTimeoutMs);
+    // El lector USB pide varios toques del mismo dedo y avisa cuántos van (onSample); el Hikvision lo ignora.
+    capture = await device.captureFingerprint(finger_no, captureTimeoutMs, { onSample });
   } catch (e) {
     // Algunos firmwares no permiten capturar a distancia: la persona ya existe en el lector, así que la
     // huella se registra en la pantalla del propio lector (Gestión de personas → número) y aquí se espera
@@ -694,6 +707,8 @@ export function loadConfig(file) {
   if (url && url.protocol !== 'https:' && !isLocalHost(url.hostname)) problems.push('cloud_url: debe empezar con https:// (http:// solo se permite con localhost o una IP de la red local).');
   const badDevice = (d) => d !== undefined && d !== null && typeof d !== 'object';
   // Un lector: { bridge_token, device? }.  Varios lectores en la misma PC: { readers: [{ name, bridge_token, device? }, …] }.
+  // `device` es opcional (la nube manda los datos). Hikvision: { host, port, https, username, password }.
+  // USB DigitalPersona: { type: "usb", lib_dir?, reader_name? }.
   let readers;
   if (Array.isArray(cfg.readers)) {
     if (!cfg.readers.length) problems.push('readers: la lista de lectores está vacía.');
@@ -767,14 +782,19 @@ export function scrubResult(value, depth = 0) {
 
 // ───────────────────────── el agente ─────────────────────────
 export class Bridge {
-  constructor(config, { stateFile, quiet = false } = {}) {
+  constructor(config, { stateFile, quiet = false, usbNative = null } = {}) {
     this.config = config;
     this.name = config.name ?? null;
     this.stateFile = stateFile;
     this.state = loadState(stateFile);
     this.quiet = quiet;
-    this.device = config.device ? new HikDevice(config.device) : null;
+    // El chofer se elige según el lector: Hikvision en red (HikDevice) o USB DigitalPersona (UsbDevice, se carga
+    // al saberlo: por `device.type: "usb"` en config.json o por el `kind` que entrega la nube).
+    this.usbNative = usbNative ?? null; // backend nativo inyectado (pruebas)
+    this.device = config.device && config.device.type !== 'usb' ? new HikDevice(config.device) : null;
     this.deviceFromCloud = !config.device;
+    this.wantUsb = config.device?.type === 'usb';
+    this.usbReady = false;
     this.deviceReachable = null;
     this.deviceError = '';
     this.deviceInfo = null;
@@ -813,7 +833,29 @@ export class Bridge {
   }
 
   // ── lector ──
-  useDeviceConfig(c) {
+  get isUsb() { return this.device?.kind === USB_KIND; }
+
+  /** Crea el chofer USB (una sola vez). Devuelve false si todavía no se puede (falta koffi o las librerías). */
+  async useUsbDevice() {
+    if (this.isUsb) return true;
+    try {
+      const { UsbDevice, slugOf } = await loadUsbModule();
+      const d = this.config.device?.type === 'usb' ? this.config.device : {};
+      this.device = new UsbDevice({
+        stateDir: path.dirname(this.stateFile), slug: slugOf(this.name, 'usb'), native: this.usbNative,
+        nativeOpts: { libDir: d.lib_dir ?? null, readerName: d.reader_name ?? null }, timeZone: this.config.timezone, log: (m) => this.log(m),
+      });
+      this.lastInfoAt = 0;
+      this.log('Lector USB DigitalPersona: el agente identifica las huellas en esta PC.');
+      return true;
+    } catch (e) {
+      this.markDevice(e);
+      return false;
+    }
+  }
+
+  async useDeviceConfig(c) {
+    if (c?.kind === USB_KIND || this.wantUsb) { await this.useUsbDevice(); return; }
     if (!this.deviceFromCloud || !c || !c.host) return;
     const next = { host: c.host, port: c.port, https: c.use_https, username: c.username, password: c.password };
     if (!this.device || !this.device.sameAs(next)) {
@@ -831,7 +873,7 @@ export class Bridge {
       if (was === false) this.log('El lector volvió a responder.');
       return;
     }
-    if (err instanceof BridgeError && ['device_unreachable', 'device_timeout', 'auth_failed', 'device_not_configured'].includes(err.code)) {
+    if (err instanceof BridgeError && ['device_unreachable', 'device_timeout', 'auth_failed', 'device_not_configured', 'usb_no_reader', 'usb_lib_missing', 'usb_koffi_missing', 'vault_error'].includes(err.code)) {
       this.deviceReachable = false;
       this.deviceError = err.code;
       if (was !== false) this.log(`Sin conexión con el lector (${err.code}${err.detail ? ' · ' + err.detail : ''}).`);
@@ -847,6 +889,15 @@ export class Bridge {
       this.markDevice(null);
     } catch (e) {
       this.markDevice(e);
+    }
+    if (this.isUsb) {
+      // Con el lector USB conectado, el agente se queda esperando dedos para las checadas.
+      if (this.deviceReachable && !this.usbReady) {
+        this.usbReady = true;
+        this.device.onReading((ev) => this.log(ev.employee_no ? `Huella reconocida: persona ${ev.employee_no}.` : 'Huella no reconocida.'));
+        this.device.startIdentify();
+      }
+      return;
     }
     if (this.deviceReachable && Date.now() - this.lastSkewAt > 10 * 60000) {
       this.lastSkewAt = Date.now();
@@ -897,9 +948,14 @@ export class Bridge {
         if (!p.employee_no) throw new BridgeError('bad_payload');
         await this.progress(cmd.id, { stage: 'capturing' });
         return enrollFingerprint(dev, p, {
-          captureTimeoutMs: this.config.capture_timeout_seconds * 1000,
+          // El USB necesita varios toques: el tiempo de captura se amplía para que alcance con calma.
+          captureTimeoutMs: this.config.capture_timeout_seconds * 1000 * (this.isUsb ? 2 : 1),
           deviceModeTimeoutMs: this.config.device_enroll_timeout_seconds * 1000,
           pollMs: this.config.device_enroll_poll_ms,
+          onSample: async (sample, samples) => {
+            this.log(`Enrolamiento de ${p.employee_no}: toque ${sample} de ${samples}.`);
+            await this.progress(cmd.id, { stage: 'capturing', sample, samples });
+          },
           onWaiting: () => this.log(`Enrolamiento de ${p.employee_no}: esperando el dedo en el lector…`),
           onDeviceMode: async (st) => {
             if (!st.heartbeat) this.log(`El lector no permite captura a distancia (${st.reason || 'sin detalle'}): registra la huella de ${p.employee_no} en la pantalla del lector.`);
@@ -909,6 +965,7 @@ export class Bridge {
       }
       case 'enroll_face': {
         if (!p.employee_no) throw new BridgeError('bad_payload');
+        if (this.isUsb) throw new BridgeError('not_supported', 'el lector USB solo registra huellas');
         await this.progress(cmd.id, { stage: 'capturing' });
         return enrollFace(dev, p, {
           captureTimeoutMs: this.config.capture_timeout_seconds * 1000,
@@ -1048,6 +1105,30 @@ export class Bridge {
     return total;
   }
 
+  /** USB: manda a la nube las lecturas pendientes (en lotes); solo se descartan las que la nube aceptó. */
+  async flushUsbReadings() {
+    if (!this.isUsb || !this.usbReady) return true;
+    let pending = this.device.takePending();
+    while (pending.length) {
+      const batch = pending.slice(0, 100);
+      try {
+        const r = await this.cloud('/api/bridge/events', { events: batch });
+        if (Number(r?.created ?? 0)) this.log(`Checadas enviadas a la nube: ${r.created} nueva(s).`);
+      } catch (e) {
+        if (!(e instanceof BridgeError && e.code === 'cloud_rejected')) {
+          if (this.eventsCloudOk !== false) this.log('Las checadas no se pudieron enviar a la nube; se reenviarán cuando vuelva.');
+          this.eventsCloudOk = false;
+          return false;
+        }
+        this.log(`La nube no aceptó un lote de checadas (${e.detail}); se descarta.`);
+      }
+      this.device.ack(batch.length);
+      pending = this.device.takePending();
+    }
+    this.eventsCloudOk = true;
+    return true;
+  }
+
   // ── ciclo ──
   async cycle({ forceEvents = false } = {}) {
     let cloudOk = true;
@@ -1070,13 +1151,16 @@ export class Bridge {
       if (this.cloudOk === false) this.log('La conexión con la nube se restableció.');
       this.pollSeconds = Math.min(Math.max(Number(data.config?.poll_seconds) || 2, 1), 30);
       this.backfillSince = data.config?.backfill_since ?? null;
-      this.useDeviceConfig(data.config);
+      await this.useDeviceConfig(data.config);
       if (this.deviceReachable === null) await this.refreshDeviceInfo(true);
       for (const cmd of data.commands ?? []) await this.runCommand(cmd);
     }
     this.cloudOk = cloudOk;
 
-    if (forceEvents || Date.now() - this.lastEventsAt >= this.config.events_interval_seconds * 1000) {
+    if (this.isUsb) {
+      // Las checadas del USB las produce este mismo agente: se envían en cuanto hay, sin leer historial.
+      if (!(await this.flushUsbReadings().catch(() => false))) cloudOk = false;
+    } else if (forceEvents || Date.now() - this.lastEventsAt >= this.config.events_interval_seconds * 1000) {
       this.lastEventsAt = Date.now();
       try {
         await this.syncEvents();
@@ -1115,6 +1199,7 @@ export class Bridge {
       const wait = (backoff || this.pollSeconds) * 1000;
       for (let t = 0; t < wait && !stop; t += 250) await sleep(250);
     }
+    if (this.isUsb) await this.device.close().catch(() => {});
     return last;
   }
 
@@ -1138,9 +1223,11 @@ export class Bridge {
       else bad(`No se pudo conectar con la nube (${e.message}).`, 'Revisa el internet de esta PC y que cloud_url sea la dirección correcta de la aplicación.');
     }
 
-    this.useDeviceConfig(cloudConfig);
+    await this.useDeviceConfig(cloudConfig);
     const dev = this.device;
-    if (!dev?.host) {
+    if (this.isUsb) {
+      await this.checkUsb({ ok, bad, info });
+    } else if (!dev?.host) {
       bad('No hay dirección del lector.', 'Captura IP, usuario y contraseña del lector en Configuración → Lector de huellas (o en "device" de config.json).');
     } else if (!dev.password) {
       bad('No hay contraseña del lector.', 'Captúrala en Configuración → Lector de huellas → Editar.');
@@ -1173,6 +1260,27 @@ export class Bridge {
     }
     try { await this.cloud('/api/bridge/heartbeat', { version: VERSION, ...(dev?.host ? { device_reachable: failures === 0 } : {}) }); } catch { /* ya reportado */ }
     return { failures, lines: out };
+  }
+
+  /** --check para el lector USB: librerías del fabricante, lector conectado, bóveda y lecturas pendientes. */
+  async checkUsb({ ok, bad, info }) {
+    const dev = this.device;
+    info(`Lector USB DigitalPersona · las huellas se guardan cifradas en ${path.basename(dev.vault.file)} (esta PC) y nunca van a la nube.`);
+    try {
+      const di = await dev.deviceInfo();
+      ok(`Lector conectado: ${di.model || USB_MODEL_LABEL}${di.serial ? ` · serie ${di.serial}` : ''}${di.firmware ? ` · firmware ${di.firmware}` : ''}${dev.native?.libDir ? ` · librerías en ${dev.native.libDir}` : ''}`);
+      const persons = await dev.listPersons();
+      ok(`Bóveda abierta: ${persons.length} persona(s), ${persons.reduce((n, p) => n + p.fingerprints, 0)} huella(s).`);
+      const pend = dev.takePending().length;
+      (pend ? info : ok)(pend ? `${pend} checada(s) guardadas en esta PC esperando internet.` : 'Sin checadas pendientes de enviar.');
+    } catch (e) {
+      const code = e?.code ?? '';
+      if (code === 'usb_koffi_missing') bad('Falta el módulo koffi para hablar con el lector.', 'En esta carpeta ejecuta:  npm install');
+      else if (code === 'usb_lib_missing') bad(`No se encontraron las librerías del fabricante (dpfpdd y dpfj). ${e.detail || ''}`, 'Instala el "DigitalPersona U.are.U RTE" o indica la carpeta en config.json: "device": { "type": "usb", "lib_dir": "C:\\\\…\\\\Lib\\\\x64" }.');
+      else if (code === 'usb_no_reader') bad('No hay un lector DigitalPersona conectado por USB.', 'Conéctalo (luz azul encendida) y revisa en el Administrador de dispositivos que Windows lo reconozca.');
+      else if (code === 'vault_error') bad(`La bóveda de huellas no se pudo abrir (${e.detail || ''}).`, 'Si vault.key se perdió, las huellas hay que registrarlas de nuevo: renombra el archivo vault-*.enc y reinicia el agente.');
+      else bad(`El lector USB no respondió (${e.message}).`);
+    }
   }
 }
 
@@ -1288,6 +1396,7 @@ async function main(argv) {
   const arg = (name) => { const i = argv.indexOf(name); return i !== -1 ? argv[i + 1] : null; };
   if (argv.includes('--help') || argv.includes('-h')) {
     console.log('Uso: node bridge.mjs [--check | --once | --probe | --probe-enroll] [--config ruta] [--state ruta] [--host ip --user u --pass p --http]');
+    console.log('     node bridge.mjs --probe --usb [--lib-dir "C:\\...\\Lib\\x64"]      prueba del lector USB DigitalPersona conectado a esta PC');
     return 0;
   }
   const configFile = path.resolve(arg('--config') ?? path.join(HERE, 'config.json'));
@@ -1296,6 +1405,15 @@ async function main(argv) {
   if (argv.includes('--probe') || argv.includes('--probe-enroll')) {
     // Datos del lector: línea de comandos > "device" de config.json > los que entrega la nube.
     let dev = null, tz = 'America/Mexico_City', cfg = null;
+    if (argv.includes('--usb')) {
+      // Lector USB DigitalPersona conectado a esta PC: prueba sin nube y sin tocar la bóveda.
+      const { probeUsb } = await loadUsbModule();
+      const readline = await import('node:readline/promises');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const failed = await probeUsb({ libDir: arg('--lib-dir'), readerName: arg('--reader'), ask: (q) => rl.question(`\n  → ${q}`) });
+      rl.close();
+      return failed ? 1 : 0;
+    }
     if (arg('--host')) {
       const https = !argv.includes('--http');
       dev = new HikDevice({ host: arg('--host'), port: Number(arg('--port')) || (https ? 443 : 80), https, username: arg('--user') || 'admin', password: arg('--pass') || '' });
@@ -1307,10 +1425,11 @@ async function main(argv) {
       const reader = wanted ? cfg.readers.find((r) => (r.name || '').toLowerCase() === wanted.toLowerCase()) : cfg.readers[0];
       if (!reader) { console.error(`No hay un lector llamado "${wanted}" en config.json. Lectores: ${cfg.readers.map((r) => r.name).join(', ')}.`); return 2; }
       const rc = readerConfig(cfg, reader);
-      if (rc.device) dev = new HikDevice(rc.device);
+      if (rc.device && rc.device.type !== 'usb') dev = new HikDevice(rc.device);
       else {
         const b = new Bridge(rc, { stateFile: readerStateFile(stateFile, cfg, reader), quiet: true });
-        try { b.useDeviceConfig((await b.cloud('/api/bridge/poll', { version: VERSION, dry_run: true })).config); } catch (e) { console.error(`No se pudieron obtener los datos del lector desde la nube (${e.message}).`); return 2; }
+        try { await b.useDeviceConfig((await b.cloud('/api/bridge/poll', { version: VERSION, dry_run: true })).config); } catch (e) { console.error(`No se pudieron obtener los datos del lector desde la nube (${e.message}).`); return 2; }
+        if (b.isUsb || rc.device?.type === 'usb') { console.error('Este lector es USB: usa  node bridge.mjs --probe --usb'); return 2; }
         dev = b.device;
       }
       if (cfg.readers.length > 1) console.log(`Lector: ${reader.name} (usa --reader "nombre" para otro).`);

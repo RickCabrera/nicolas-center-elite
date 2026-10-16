@@ -4,12 +4,12 @@ import { logEvent } from '@/lib/audit';
 import { decrypt, encrypt, randomToken, sha256 } from '@/lib/crypto';
 import { notFound } from '@/lib/errors';
 import type { Tx } from '@/lib/db';
-import { connectionData } from '@/modules/attendance/server';
+import { connectionData, type DeviceKind } from '@/modules/attendance/server';
 
-type Row = { id: string; name: string; location_id: string; webhook_token_enc: string; bridge_token_enc: string };
+type Row = { id: string; name: string; location_id: string; kind: DeviceKind; webhook_token_enc: string; bridge_token_enc: string };
 
 async function load(db: Tx, id: string) {
-  const [d] = await db<Row[]>`select id, name, location_id, webhook_token_enc, bridge_token_enc from devices where id = ${id}`;
+  const [d] = await db<Row[]>`select id, name, location_id, kind, webhook_token_enc, bridge_token_enc from devices where id = ${id}`;
   if (!d) throw notFound('Lector no encontrado.');
   return d;
 }
@@ -25,7 +25,7 @@ async function siblings(db: Tx, d: Row) {
 export const GET = route({ auth: 'owner' }, async ({ db, params }) => {
   const d = await load(db, params.id);
   await logEvent(db, 'security', `Consultó los datos de conexión del lector "${d.name}".`, { table: 'devices', rowId: d.id });
-  return connectionData(decrypt(d.webhook_token_enc), decrypt(d.bridge_token_enc), await siblings(db, d), d.name);
+  return connectionData(decrypt(d.webhook_token_enc), decrypt(d.bridge_token_enc), await siblings(db, d), d.name, d.kind);
 });
 
 const Body = z.object({ regenerate: z.enum(['webhook', 'bridge']) });
@@ -41,5 +41,5 @@ export const POST = route({ auth: 'owner', body: Body }, async ({ db, params, bo
   }
   await logEvent(db, 'security', `Regeneró el token ${body.regenerate === 'webhook' ? 'del webhook' : 'del agente puente'} del lector "${d.name}".`, { table: 'devices', rowId: d.id });
   const fresh = await load(db, params.id);
-  return connectionData(decrypt(fresh.webhook_token_enc), decrypt(fresh.bridge_token_enc), await siblings(db, fresh), fresh.name);
+  return connectionData(decrypt(fresh.webhook_token_enc), decrypt(fresh.bridge_token_enc), await siblings(db, fresh), fresh.name, fresh.kind);
 });

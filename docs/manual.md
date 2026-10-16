@@ -122,7 +122,7 @@ Todo lo anterior, para todos los pacientes y ambas sedes, más:
 - **Control de huella → Reportes**: horas trabajadas del personal por día y semana, y asistencias de pacientes.
 - **Configuración**: datos de la clínica y logo; sedes (el domicilio sale en las recetas); membresías y precios;
   cobros y facturación (estado de Stripe y Facturapi, OXXO, vigencia de links, IVA, código postal de expedición);
-  lectores (estado, probar conexión, sincronizar hora, recuperar eventos, datos de conexión del agente);
+  lectores (estado, probar conexión, sincronizar hora, recuperar eventos, datos de conexión del agente; al agregar uno se elige el tipo: Hikvision en red o USB DigitalPersona conectado a la PC);
   catálogos (tipos de sesión, tipos de estudio, etiquetas); parámetros; plantillas legales con vista previa;
   auditoría (quién cambió qué y cuándo, con antes y después); datos (exportar el expediente de un paciente en
   ZIP, respaldo general en CSV) y solicitudes de privacidad (ARCO).
@@ -132,6 +132,7 @@ Todo lo anterior, para todos los pacientes y ambas sedes, más:
 | Situación | Qué hacer |
 | --- | --- |
 | El lector aparece "Sin conexión" | Revisar que la PC de recepción esté encendida y con internet; mientras tanto usar Registro manual. Las lecturas hechas en el lector se recuperan solas al volver. |
+| Lector USB (DigitalPersona): no checa | Ese lector depende de la PC donde está conectado: debe estar encendida, con el agente corriendo y el lector conectado (luz azul). Al registrar la huella, el paciente pone el mismo dedo 4 veces. No registra rostro. |
 | "Agente puente desconectado" | En la PC de recepción, reiniciar o ver `bridge\logs\agente.log` (ver `bridge/README.md`). |
 | Recepción dice que no puede ver algo del expediente | Es intencional: la información clínica solo la ve el dueño y el fisioterapeuta. Lo administrativo (datos, citas, pagos, huella) sí lo tiene. |
 | Un fisioterapeuta no recibió su invitación | Equipo → su tarjeta → Editar → reenviar invitación, y copiar el enlace. |

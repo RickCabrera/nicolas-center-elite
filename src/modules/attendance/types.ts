@@ -1,6 +1,7 @@
 /** Tipos compartidos por las pantallas del módulo de huella (mismos nombres que la API). */
+export type DeviceKind = 'hikvision' | 'usb_digitalpersona';
 export type Device = {
-  id: string; name: string; location_id: string; location_name: string;
+  id: string; name: string; location_id: string; location_name: string; kind: DeviceKind;
   model: string; serial: string; firmware: string;
   host: string; port: number; use_https: boolean; username: string; has_password: boolean;
   active: boolean; online: boolean; bridge_online: boolean;
@@ -9,6 +10,7 @@ export type Device = {
 };
 
 export type DeviceSecrets = {
+  kind: DeviceKind;
   webhook_url: string;
   listener: { protocol: 'HTTP' | 'HTTPS'; host: string; port: number; path: string };
   bridge_token: string;
@@ -40,14 +42,14 @@ export type AttendanceList = { date: string | null; total: number; items: Attend
 export type CommandStatus = {
   id: string; kind: string; status: 'pending' | 'running' | 'done' | 'error';
   error: string | null; error_code: string | null; result: Record<string, unknown> | null;
-  progress?: { stage: 'capturing' | 'on_device'; employee_no: string | null } | null;
+  progress?: { stage: 'capturing' | 'on_device'; employee_no: string | null; sample?: number | null; samples?: number | null } | null;
   device_id: string; device_name: string; bridge_online: boolean;
 };
 
 export type EnrollInfo = {
   person_type: 'patient' | 'staff'; person_id: string; enrolled_at: string | null; face_enrolled_at: string | null; has_consent: boolean;
-  device: { id: string; name: string; online: boolean; bridge_online: boolean } | null;
-  devices: { id: string; name: string; location_name: string; online: boolean; bridge_online: boolean }[];
+  device: { id: string; name: string; kind: DeviceKind; online: boolean; bridge_online: boolean } | null;
+  devices: { id: string; name: string; kind: DeviceKind; location_name: string; online: boolean; bridge_online: boolean }[];
   enrollments: { device_id: string; device_name: string; status: 'pending' | 'enrolled' | 'failed'; enrolled_at: string | null; face_enrolled_at: string | null }[];
 };
 

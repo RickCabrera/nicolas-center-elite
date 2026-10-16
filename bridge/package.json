@@ -1,0 +1,10 @@
+{
+  "name": "nce-bridge",
+  "private": true,
+  "description": "Agente puente de Nicolas Center Elite. Para el lector Hikvision no necesita instalar nada; para el lector USB DigitalPersona ejecuta \"npm install\" en esta carpeta (instala koffi).",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "optionalDependencies": {
+    "koffi": "2.9.0"
+  }
+}

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { route, type RouteCtx } from '@/lib/api';
 import { conflict } from '@/lib/errors';
-import { asciiName, enqueueCommand, enrollDevices, listDevices, loadPerson, pickDevice, queuePersonRemoval, type CommandKind } from '@/modules/attendance/server';
+import { asciiName, enqueueCommand, enrollDevices, listDevices, loadPerson, pickDevice, queuePersonRemoval, USB_KIND, type CommandKind } from '@/modules/attendance/server';
 
 const PersonRef = z.object({
   person_type: z.enum(['patient', 'staff']),
@@ -32,8 +32,8 @@ export const GET = route({ auth: 'user', query: PersonRef }, async ({ db, user, 
     const face_enrolled_at = enrollments.filter((e) => e.status === 'enrolled' && e.face_enrolled_at).map((e) => e.face_enrolled_at as Date).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
     return {
       person_type: person.type, person_id: person.id, enrolled_at: person.enrolled_at, face_enrolled_at, has_consent,
-      device: device ? { id: device.id, name: device.name, online: device.online, bridge_online: device.bridge_online } : null,
-      devices: devices.map((d) => ({ id: d.id, name: d.name, location_name: d.location_name, online: d.online, bridge_online: d.bridge_online })),
+      device: device ? { id: device.id, name: device.name, kind: device.kind, online: device.online, bridge_online: device.bridge_online } : null,
+      devices: devices.map((d) => ({ id: d.id, name: d.name, kind: d.kind, location_name: d.location_name, online: d.online, bridge_online: d.bridge_online })),
       enrollments,
     };
   });
@@ -75,6 +75,8 @@ export const POST = route({ auth: 'user', body: Body }, async (ctx) => {
   return system(async (tx) => {
     const device = await pickDevice(tx, person, body.device_id);
     if (!device) throw conflict('No hay un lector activo en la sede.', 'no_device');
+    // El sensor USB solo lee huellas (HUE-20).
+    if (device.kind === USB_KIND && kind === 'enroll_face') throw conflict(`El lector "${device.name}" es USB y solo registra huellas, no rostros.`, 'face_not_supported');
 
     const ref = { patientId: person.type === 'patient' ? person.id : null, userId: person.type === 'staff' ? person.id : null };
     const who = person.type === 'patient' ? tx`patient_id = ${person.id}` : tx`user_id = ${person.id}`;
