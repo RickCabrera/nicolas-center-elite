@@ -582,6 +582,30 @@ describe('HUE-07 / HUE-13 · enrolamiento', () => {
     expect(after[0].face_enrolled_at).toBeTruthy();
   });
 
+  it('dueño sin sede con varios lectores: prefiere el que tiene el agente conectado y ofrece la lista para elegir', async () => {
+    const second = await createDevice('Consultorio 2', fx.cordoba);
+    try {
+      // Ninguno con agente: ambiguo → sin lector por defecto, pero con lista (los 3 activos).
+      await sqlSystem((tx) => tx`update devices set bridge_seen_at = null`);
+      let info = await call(ENROLL_INFO, { as: fx.owner, url: `/api/enrollments?person_type=staff&person_id=${fx.owner.id}` });
+      expect(info.data.device).toBeNull();
+      expect(info.data.devices.map((d: any) => d.name).sort()).toEqual(['Consultorio 2', 'Recepción Córdoba', 'Recepción Orizaba']);
+      // Con el agente de uno solo conectado, ese es el elegido.
+      await sqlSystem((tx) => tx`update devices set bridge_seen_at = now() where id = ${second.id}`);
+      info = await call(ENROLL_INFO, { as: fx.owner, url: `/api/enrollments?person_type=staff&person_id=${fx.owner.id}` });
+      expect(info.data.device?.id).toBe(second.id);
+      // Y se puede pedir otro explícitamente.
+      const r = await call(ENROLL, { as: fx.owner, body: { person_type: 'staff', person_id: fx.owner.id, device_id: dev.id } });
+      expect(r.status).toBe(200);
+      expect(r.data.device_id).toBe(dev.id);
+      await sqlSystem((tx) => tx`update device_commands set status = 'cancelled' where id = ${r.data.command_id}`);
+    } finally {
+      await sqlSystem((tx) => tx`delete from enrollments where user_id = ${fx.owner.id}`);
+      await sqlSystem((tx) => tx`delete from devices where id = ${second.id}`);
+      await sqlSystem((tx) => tx`update devices set bridge_seen_at = null`);
+    }
+  });
+
   it('varios lectores en la sede: "Datos de conexión" entrega un config.json con todos', async () => {
     const one = await call(SECRETS, { as: fx.owner, params: { id: dev.id } });
     expect(one.data.bridge_config_multi_json).toBeNull();

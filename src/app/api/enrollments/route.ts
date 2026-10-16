@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { route, type RouteCtx } from '@/lib/api';
 import { conflict } from '@/lib/errors';
-import { asciiName, enqueueCommand, listDevices, loadPerson, pickDevice, queuePersonRemoval, type CommandKind } from '@/modules/attendance/server';
+import { asciiName, enqueueCommand, enrollDevices, listDevices, loadPerson, pickDevice, queuePersonRemoval, type CommandKind } from '@/modules/attendance/server';
 
 const PersonRef = z.object({
   person_type: z.enum(['patient', 'staff']),
@@ -24,6 +24,7 @@ export const GET = route({ auth: 'user', query: PersonRef }, async ({ db, user, 
   }
   return system(async (tx) => {
     const device = await pickDevice(tx, person);
+    const devices = await enrollDevices(tx, person);
     const who = person.type === 'patient' ? tx`e.patient_id = ${person.id}` : tx`e.user_id = ${person.id}`;
     const enrollments = await tx<{ device_id: string; device_name: string; status: string; enrolled_at: Date | null; face_enrolled_at: Date | null }[]>`
       select e.device_id, d.name as device_name, e.status, e.enrolled_at, e.face_enrolled_at
@@ -32,6 +33,7 @@ export const GET = route({ auth: 'user', query: PersonRef }, async ({ db, user, 
     return {
       person_type: person.type, person_id: person.id, enrolled_at: person.enrolled_at, face_enrolled_at, has_consent,
       device: device ? { id: device.id, name: device.name, online: device.online, bridge_online: device.bridge_online } : null,
+      devices: devices.map((d) => ({ id: d.id, name: d.name, location_name: d.location_name, online: d.online, bridge_online: d.bridge_online })),
       enrollments,
     };
   });

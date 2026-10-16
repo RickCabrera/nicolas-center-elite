@@ -47,6 +47,7 @@ export type CommandStatus = {
 export type EnrollInfo = {
   person_type: 'patient' | 'staff'; person_id: string; enrolled_at: string | null; face_enrolled_at: string | null; has_consent: boolean;
   device: { id: string; name: string; online: boolean; bridge_online: boolean } | null;
+  devices: { id: string; name: string; location_name: string; online: boolean; bridge_online: boolean }[];
   enrollments: { device_id: string; device_name: string; status: 'pending' | 'enrolled' | 'failed'; enrolled_at: string | null; face_enrolled_at: string | null }[];
 };
 

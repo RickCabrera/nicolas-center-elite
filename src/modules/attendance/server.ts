@@ -355,18 +355,33 @@ export async function loadPerson(db: Tx, user: { id: string; role: string }, per
   return { type: 'staff', id: u.id, name: u.full_name, location_id: u.location_id, employee_no: u.hik_employee_no, enrolled_at: u.fingerprint_enrolled_at, active: u.active };
 }
 
-/** Lector donde se enrola: el indicado, el activo de la sede de la persona o, si solo hay uno activo, ese. */
+/** Entre varios lectores, el mejor para enrolar: con agente conectado primero, luego en línea, luego el primero. */
+const preferOnline = (list: DeviceRow[]): DeviceRow | null =>
+  list.find((d) => d.bridge_online) ?? list.find((d) => d.online) ?? list[0] ?? null;
+
+/**
+ * Lector donde se enrola: el indicado; si no, el de la sede de la persona (prefiriendo el que tenga el agente
+ * conectado); si la persona no tiene sede (dueño), el que tenga el agente conectado o, si solo hay uno, ese.
+ * Cuando queda ambiguo, la pantalla ofrece elegir entre `enrollDevices`.
+ */
 export async function pickDevice(sys: Tx, person: Person, deviceId?: string | null): Promise<DeviceRow | null> {
   if (deviceId) {
     const [d] = await listDevices(sys, { id: deviceId, onlyActive: true });
     return d ?? null;
   }
   if (person.location_id) {
-    const [d] = await listDevices(sys, { locationId: person.location_id, onlyActive: true });
-    return d ?? null;
+    return preferOnline(await listDevices(sys, { locationId: person.location_id, onlyActive: true }));
   }
   const all = await listDevices(sys, { onlyActive: true });
-  return all.length === 1 ? all[0] : null;
+  if (all.length === 1) return all[0];
+  const withBridge = all.filter((d) => d.bridge_online);
+  return withBridge.length === 1 ? withBridge[0] : null;
+}
+
+/** Lectores activos entre los que se puede elegir para enrolar (todos; la sede propia primero). */
+export async function enrollDevices(sys: Tx, person: Person): Promise<DeviceRow[]> {
+  const all = await listDevices(sys, { onlyActive: true });
+  return all.sort((a, b) => Number(b.location_id === person.location_id) - Number(a.location_id === person.location_id) || Number(b.bridge_online) - Number(a.bridge_online));
 }
 
 /**

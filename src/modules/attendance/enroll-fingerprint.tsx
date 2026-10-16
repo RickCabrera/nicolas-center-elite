@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { FingerRings } from '@/components/icons';
-import { Button, Confirm, Notice, ScanOverlay, useToast } from '@/components/ui';
+import { Button, Confirm, Notice, ScanOverlay, Select, useToast } from '@/components/ui';
 import { api, ApiError, refresh, useApi } from '@/lib/client';
 import { fmtDate } from '@/lib/dates';
 import { ConsentSheet } from '@/modules/record/consent-sheet';
@@ -33,6 +33,8 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
+  // Lector elegido a mano cuando hay varios (dueño sin sede, o sede con más de un lector).
+  const [deviceId, setDeviceId] = useState('');
   const aborted = useRef(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; aborted.current = true; }; }, []);
@@ -53,7 +55,8 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
     setStarting(true);
     aborted.current = false;
     try {
-      const r = await api.post<{ command_id: string; device_name: string; bridge_online: boolean }>('/api/enrollments', { person_type: personType, person_id: personId, method });
+      const chosen = deviceId || info.data?.device?.id || info.data?.devices?.[0]?.id;
+      const r = await api.post<{ command_id: string; device_name: string; bridge_online: boolean }>('/api/enrollments', { person_type: personType, person_id: personId, method, ...(chosen ? { device_id: chosen } : {}) });
       if (!alive.current) return;
       setScan({ method, commandId: r.command_id, deviceName: r.device_name, bridgeOnline: r.bridge_online, started: false, onDevice: null });
       setStarting(false);
@@ -138,7 +141,10 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
     }
   };
 
-  const noDevice = info.data && !info.data.device;
+  const devices = info.data?.devices ?? [];
+  const noDevice = !!info.data && !info.data.device && devices.length === 0;
+  const showPicker = devices.length > 1;
+  const selected = deviceId || info.data?.device?.id || devices[0]?.id || '';
 
   return (
     <div className="stack sm" style={{ minWidth: 0 }}>
@@ -175,7 +181,17 @@ export function EnrollFingerprint({ personType, personId, enrolledAt, onDone }: 
         </Button>
       )}
 
-      {noDevice && !enrolled && <div className="t-small">No hay un lector activo en la sede. El dueño puede agregarlo en Configuración → Lectores.</div>}
+      {showPicker && (
+        <label className="t-small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          Lector
+          <Select value={selected} onChange={(e) => setDeviceId(e.target.value)} disabled={!!scan} style={{ flex: 1, minWidth: 0 }}>
+            {devices.map((d) => (
+              <option key={d.id} value={d.id}>{d.name} · {d.location_name}{d.bridge_online ? '' : ' (agente desconectado)'}</option>
+            ))}
+          </Select>
+        </label>
+      )}
+      {noDevice && !enrolled && <div className="t-small">No hay un lector activo. El dueño puede agregarlo en Configuración → Lectores.</div>}
       {info.error && !info.data && <div className="t-small">{info.error.message}</div>}
 
       {message && (
