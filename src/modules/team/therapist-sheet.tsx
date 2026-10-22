@@ -4,9 +4,10 @@ import { useMeta } from '@/components/meta';
 import { Badge, Button, Checkbox, Confirm, ErrorNote, Field, Input, Notice, Select, Sheet, Skeleton, useForm, useToast } from '@/components/ui';
 import { api, ApiError, refresh, useApi } from '@/lib/client';
 import { fmtDateTime } from '@/lib/dates';
+import { parseMoney } from '@/lib/format';
 import { HoursEditor } from '@/modules/agenda/hours-editor';
 import { EnrollFingerprint } from '@/modules/attendance/enroll-fingerprint';
-import type { InviteResult, TeamUserDetail } from './types';
+import type { InviteResult, SalaryPeriod, TeamUserDetail } from './types';
 import { InviteLinkBox, SectionTitle } from './ui';
 
 export const TITLE_OPTIONS = [
@@ -14,19 +15,30 @@ export const TITLE_OPTIONS = [
   { value: 'Dra.', label: 'Dra.' }, { value: 'Dr.', label: 'Dr.' },
 ];
 
+/** EQ-08 · Periodicidad del sueldo. */
+export const SALARY_PERIOD_OPTIONS: { value: SalaryPeriod; label: string }[] = [
+  { value: 'weekly', label: 'Semanal' }, { value: 'biweekly', label: 'Quincenal' }, { value: 'monthly', label: 'Mensual' },
+];
+
 type Form = {
   full_name: string; title: string; username: string; email: string; specialty: string; location_id: string; phone: string;
   license_number: string; license_institution: string; specialty_license: string; is_physician: boolean;
+  salary: string; salary_period: SalaryPeriod;
 };
 const EMPTY: Form = {
   full_name: '', title: 'L.F.T.', username: '', email: '', specialty: '', location_id: '', phone: '',
   license_number: '', license_institution: '', specialty_license: '', is_physician: false,
+  salary: '', salary_period: 'monthly',
 };
 const toForm = (u: TeamUserDetail): Form => ({
   full_name: u.full_name, title: u.title, username: u.username, email: u.email, specialty: u.specialty,
   location_id: u.location_id ?? '', phone: u.phone, license_number: u.license_number ?? '',
   license_institution: u.license_institution ?? '', specialty_license: u.specialty_license ?? '', is_physician: u.is_physician,
+  salary: u.salary_cents === null ? '' : pesos(u.salary_cents), salary_period: u.salary_period ?? 'monthly',
 });
+
+/** Centavos → texto editable: 1250000 → "12500", 1250050 → "12500.50". */
+const pesos = (cents: number) => (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2));
 
 /** Sugerencia de usuario a partir del nombre: "Karla Ocampo Ruiz" → "k.ocampo". */
 function suggestUsername(name: string): string {
@@ -97,6 +109,25 @@ function Fields({ f, isNew, reception = false, onName, onUsername }: { f: Return
         <Notice>Recepción atiende el mostrador: pacientes, agenda, mensualidades y huella de todas las sedes. No ve información clínica, por eso no lleva cédula ni horario de citas.</Notice>
       )}
       {!reception && <ClinicalFields f={f} isNew={isNew} />}
+      <SalaryFields f={f} />
+    </>
+  );
+}
+
+/** EQ-08 · Sueldo de referencia. Solo el dueño abre esta hoja y solo sus rutas lo leen. */
+function SalaryFields({ f }: { f: ReturnType<typeof useForm<Form>> }) {
+  const e = f.errors;
+  return (
+    <>
+      <SectionTitle>Sueldo</SectionTitle>
+      <div className="grid-form">
+        <Field label="Sueldo (MXN, opcional)" error={e.salary} hint="Solo lo ves tú. Es un registro de referencia, no genera pagos.">
+          <Input {...f.bind('salary')} inputMode="decimal" placeholder="12000" autoComplete="off" />
+        </Field>
+        <Field label="Periodicidad" error={e.salary_period}>
+          <Select {...f.bind('salary_period')}>{SALARY_PERIOD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select>
+        </Field>
+      </div>
     </>
   );
 }
@@ -133,7 +164,16 @@ function ClinicalFields({ f, isNew }: { f: ReturnType<typeof useForm<Form>>; isN
   );
 }
 
-const payload = (v: Form) => ({ ...v, full_name: v.full_name.trim(), username: v.username.trim(), email: v.email.trim() });
+const payload = ({ salary, ...v }: Form) => ({
+  ...v, full_name: v.full_name.trim(), username: v.username.trim(), email: v.email.trim(),
+  salary_cents: salary.trim() === '' ? null : parseMoney(salary),
+});
+
+/** Los errores del servidor llegan con el nombre de la columna (`salary_cents`); el formulario usa `salary`. */
+const formErrors = (fields: Record<string, string>) => {
+  const { salary_cents, ...rest } = fields;
+  return salary_cents ? { ...rest, salary: salary_cents } : rest;
+};
 
 /** Validación previa en el navegador (el servidor repite todo). */
 function localErrors(v: Form): Record<string, string> {
@@ -143,6 +183,7 @@ function localErrors(v: Form): Record<string, string> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.email.trim())) e.email = 'Escribe un correo válido.';
   if (!v.location_id) e.location_id = 'Selecciona la sede.';
   if (v.is_physician && !v.license_number.trim()) e.license_number = 'Escribe la cédula profesional para marcarlo como médico.';
+  if (v.salary.trim() !== '' && parseMoney(v.salary) === null) e.salary = 'Escribe un sueldo válido, por ejemplo 12000 o 12000.50.';
   return e;
 }
 
@@ -167,7 +208,7 @@ function CreateBody({ onClose, role }: { onClose: () => void; role: StaffRole })
       toast(reception ? 'Recepción agregada' : 'Fisioterapeuta agregado');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(0, 'error', 'No se pudo guardar. Intenta de nuevo.');
-      if (err.fields) f.setErrors(err.fields);
+      if (err.fields) f.setErrors(formErrors(err.fields));
       setError(err);
     } finally {
       setBusy(false);
@@ -246,7 +287,7 @@ function EditForm({ user, onClose, onDeactivate, reload }: { user: TeamUserDetai
       onClose();
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(0, 'error', 'No se pudo guardar. Intenta de nuevo.');
-      if (err.fields) f.setErrors(err.fields);
+      if (err.fields) f.setErrors(formErrors(err.fields));
       setError(err);
     } finally {
       setBusy(false);

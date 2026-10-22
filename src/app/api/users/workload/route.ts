@@ -13,7 +13,7 @@ export const GET = route({ auth: 'owner', query: Query }, async ({ query, system
     const { from, to } = weekRange(query.week_of ?? today);
     const items = await tx<WorkloadRow[]>`
       select u.id, trim(u.title || ' ' || u.full_name) as display_name, u.title, u.full_name, u.username, u.email, u.specialty,
-             u.location_id, l.name as location_name, u.is_physician, u.license_number, u.active,
+             u.location_id, l.name as location_name, u.is_physician, u.license_number, u.active, u.salary_cents, u.salary_period, -- EQ-08
              u.fingerprint_enrolled_at, u.last_login_at, (u.password_hash is not null) as has_password,
              (u.password_hash is null and exists (
                 select 1 from auth_tokens t where t.user_id = u.id and t.kind = 'invite' and t.used_at is null and t.expires_at > now()

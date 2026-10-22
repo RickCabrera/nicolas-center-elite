@@ -30,6 +30,13 @@ export const phone = z.string().trim().max(30, 'Máximo 30 caracteres.').refine(
 export const license = z.string().trim().nullish().transform((v) => (v ? v.replace(/\s+/g, '') : null))
   .refine((v) => v === null || /^[0-9A-Za-z-]{5,12}$/.test(v), 'La cédula lleva de 5 a 12 caracteres, sin espacios.');
 
+/** EQ-08 · Periodicidad del sueldo registrado por el dueño. */
+export const SALARY_PERIODS = ['weekly', 'biweekly', 'monthly'] as const;
+export const salaryPeriod = z.enum(SALARY_PERIODS, 'Elige la periodicidad del sueldo.');
+/** EQ-08 · Sueldo en centavos MXN; null = sin capturar. */
+export const salaryCents = z.number('Escribe un sueldo válido.').int('Escribe un sueldo válido.')
+  .min(0, 'El sueldo no puede ser negativo.').max(100_000_000, 'El sueldo es demasiado alto.').nullable();
+
 /**
  * EQ-02 · Alta de una persona del equipo. AUTH-10 · El dueño elige entre fisioterapeuta y recepción;
  * cualquier otro valor (por ejemplo `owner`) se toma como fisioterapeuta: aquí nunca se crea otro dueño.
@@ -47,6 +54,8 @@ export const NewUser = z.object({
   license_institution: optionalText(160),
   specialty_license: license,
   is_physician: z.boolean().default(false),
+  salary_cents: salaryCents.default(null),
+  salary_period: salaryPeriod.default('monthly'),
 });
 
 /** EQ-03 · Edición por el dueño: los mismos campos, todos opcionales. */
@@ -62,17 +71,23 @@ export const EditUser = z.object({
   license_institution: optionalText(160).optional(),
   specialty_license: license.optional(),
   is_physician: z.boolean().optional(),
+  salary_cents: salaryCents.optional(),
+  salary_period: salaryPeriod.optional(),
 });
 
 export const PHYSICIAN_NEEDS_LICENSE =
   'Para habilitar recetas médicas registra la cédula profesional de médico (art. 28 Bis de la Ley General de Salud).';
 
-/** Columnas de `users` que pueden salir por la API. Nunca `password_hash`. */
+/**
+ * Columnas de `users` que pueden salir por la API. Nunca `password_hash`.
+ * EQ-08 · `salary_*` solo sale por rutas del dueño (todas las que usan `loadUser`).
+ */
 export type TeamUser = {
   id: string; username: string; email: string; role: 'owner' | 'therapist' | 'reception'; full_name: string; title: string;
   display_name: string; specialty: string; location_id: string | null; location_name: string | null; phone: string;
   license_number: string | null; license_institution: string | null; specialty_license: string | null;
-  is_physician: boolean; active: boolean; deactivated_at: Date | null; last_login_at: Date | null;
+  is_physician: boolean; salary_cents: number | null; salary_period: 'weekly' | 'biweekly' | 'monthly';
+  active: boolean; deactivated_at: Date | null; last_login_at: Date | null;
   fingerprint_enrolled_at: Date | null; created_at: Date; has_password: boolean; invited_pending: boolean;
 };
 
@@ -81,7 +96,7 @@ export async function loadUser(tx: Tx, id: string): Promise<TeamUser> {
   const [u] = await tx<TeamUser[]>`
     select u.id, u.username, u.email, u.role, u.full_name, u.title, trim(u.title || ' ' || u.full_name) as display_name,
            u.specialty, u.location_id, l.name as location_name, u.phone, u.license_number, u.license_institution,
-           u.specialty_license, u.is_physician, u.active, u.deactivated_at, u.last_login_at, u.fingerprint_enrolled_at,
+           u.specialty_license, u.is_physician, u.salary_cents, u.salary_period, u.active, u.deactivated_at, u.last_login_at, u.fingerprint_enrolled_at,
            u.created_at, (u.password_hash is not null) as has_password,
            (u.password_hash is null and exists (
               select 1 from auth_tokens t where t.user_id = u.id and t.kind = 'invite' and t.used_at is null and t.expires_at > now()

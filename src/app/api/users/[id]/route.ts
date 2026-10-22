@@ -16,7 +16,8 @@ export const GET = route({ auth: 'owner' }, async ({ params, system }) =>
 );
 
 const COLUMNS = ['full_name', 'title', 'username', 'email', 'specialty', 'location_id', 'phone',
-  'license_number', 'license_institution', 'specialty_license', 'is_physician'] as const;
+  'license_number', 'license_institution', 'specialty_license', 'is_physician',
+  'salary_cents', 'salary_period'] as const; // EQ-08 · sueldo: solo lo ve y edita el dueño
 
 const CLINICAL_COLUMNS: readonly string[] = ['specialty', 'license_number', 'license_institution', 'specialty_license', 'is_physician'];
 

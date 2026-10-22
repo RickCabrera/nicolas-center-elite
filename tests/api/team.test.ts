@@ -301,6 +301,48 @@ describe('EQ-03 · edición por el dueño', () => {
   });
 });
 
+describe('EQ-08 · sueldo del equipo (solo dueño)', () => {
+  it('se captura en el alta, se edita, se borra y aparece en las listas del dueño', async () => {
+    const created = await call(CREATE, { as: fx.owner, body: newTherapist({ username: 's.sueldo', email: 's.sueldo@prueba.mx', salary_cents: 1_200_000, salary_period: 'biweekly' }) });
+    expect(created.status).toBe(200);
+    expect(created.data.user).toMatchObject({ salary_cents: 1_200_000, salary_period: 'biweekly' });
+    const id = created.data.user.id;
+
+    const edit = await call(EDIT, { as: fx.owner, params: { id }, method: 'PATCH', body: { salary_cents: 1_500_050, salary_period: 'monthly' } });
+    expect(edit.data).toMatchObject({ salary_cents: 1_500_050, salary_period: 'monthly' });
+    expect((await call(DETAIL, { as: fx.owner, params: { id } })).data.salary_cents).toBe(1_500_050);
+    const list = await call(USERS, { as: fx.owner, url: '/api/users' });
+    expect(list.data.find((u: { id: string }) => u.id === id)).toMatchObject({ salary_cents: 1_500_050, salary_period: 'monthly' });
+    const work = await call(WORKLOAD, { as: fx.owner, url: '/api/users/workload' });
+    expect(work.data.items.find((u: { id: string }) => u.id === id)).toMatchObject({ salary_cents: 1_500_050 });
+
+    // Editar otro dato no toca el sueldo; mandarlo en null lo borra.
+    expect((await call(EDIT, { as: fx.owner, params: { id }, method: 'PATCH', body: { phone: '2721112233' } })).data.salary_cents).toBe(1_500_050);
+    expect((await call(EDIT, { as: fx.owner, params: { id }, method: 'PATCH', body: { salary_cents: null } })).data.salary_cents).toBeNull();
+  });
+
+  it('sin sueldo queda en null y mensual; valida monto y periodicidad', async () => {
+    const r = await call(CREATE, { as: fx.owner, body: newTherapist({ username: 's.nada', email: 's.nada@prueba.mx' }) });
+    expect(r.data.user).toMatchObject({ salary_cents: null, salary_period: 'monthly' });
+    const neg = await call(EDIT, { as: fx.owner, params: { id: fx.therapistA.id }, method: 'PATCH', body: { salary_cents: -1 } });
+    expect(neg.status).toBe(400);
+    expect(neg.error!.fields).toHaveProperty('salary_cents');
+    const frac = await call(EDIT, { as: fx.owner, params: { id: fx.therapistA.id }, method: 'PATCH', body: { salary_cents: 10.5 } });
+    expect(frac.status).toBe(400);
+    const per = await call(EDIT, { as: fx.owner, params: { id: fx.therapistA.id }, method: 'PATCH', body: { salary_period: 'anual' } });
+    expect(per.status).toBe(400);
+    expect(per.error!.fields).toHaveProperty('salary_period');
+  });
+
+  it('un fisioterapeuta no puede leer el sueldo con su sesión, ni el suyo ni el de otros', async () => {
+    await call(EDIT, { as: fx.owner, params: { id: fx.therapistA.id }, method: 'PATCH', body: { salary_cents: 900_000 } });
+    await expect(sqlAs(fx.therapistA, (tx) => tx`select salary_cents from users where id = ${fx.therapistA.id}`)).rejects.toThrow(/permission denied/);
+    const prof = await call(PROFILE, { as: fx.therapistA, url: '/api/profile' });
+    expect(prof.status).toBe(200);
+    expect(prof.data).not.toHaveProperty('salary_cents');
+  });
+});
+
 describe('CFG-08 · mi perfil y sesiones', () => {
   it('lee y edita sus propios datos', async () => {
     const g = await call(PROFILE, { as: fx.therapistA });

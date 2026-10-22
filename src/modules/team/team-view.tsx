@@ -4,12 +4,17 @@ import { PageHeader } from '@/components/shell';
 import { Badge, Button, Card, Chip, Empty, ErrorNote, Skeleton, useToast } from '@/components/ui';
 import { api, ApiError, qs, refresh, useApi } from '@/lib/client';
 import { addDays, fmtDate } from '@/lib/dates';
-import { initials } from '@/lib/format';
+import { initials, money } from '@/lib/format';
 import { DeactivateWizard } from './deactivate-wizard';
 import { ReassignSheet } from './reassign-sheet';
 import { TherapistSheet } from './therapist-sheet';
-import type { StaffRow, Workload, WorkloadRow } from './types';
+import type { SalaryPeriod, StaffRow, Workload, WorkloadRow } from './types';
 import { LoadBar, TeamAvatar } from './ui';
+
+const PERIOD_LABEL: Record<SalaryPeriod, string> = { weekly: 'semanal', biweekly: 'quincenal', monthly: 'mensual' };
+/** EQ-08 · "Sueldo: $12,000 mensual" o "Sin sueldo registrado". */
+const salaryLabel = (u: { salary_cents: number | null; salary_period: SalaryPeriod }) =>
+  u.salary_cents === null ? 'Sin sueldo registrado' : `Sueldo: ${money(u.salary_cents)} ${PERIOD_LABEL[u.salary_period] ?? ''}`.trim();
 
 type Open =
   | { kind: 'new'; role?: 'reception' } | { kind: 'edit'; id: string; role?: 'reception' } | { kind: 'deactivate'; id: string } | { kind: 'reassign'; from?: string } | null;
@@ -125,6 +130,7 @@ export function TeamView() {
                 <div className="grow">
                   <div className="t-name" style={{ overflowWrap: 'anywhere' }}>{t.display_name}</div>
                   <div className="t-small" style={{ marginTop: 3 }}>{[t.specialty || 'Fisioterapeuta', t.location_name ?? 'Sin sede'].join(' · ')}</div>
+                  <div className="t-small" style={{ marginTop: 3 }}>{salaryLabel(t)}</div>
                 </div>
               </div>
               {(t.is_physician || t.invited_pending || !t.active || (!t.has_password && !t.invited_pending)) && (
@@ -180,6 +186,7 @@ export function TeamView() {
               <div className="grow" style={{ minWidth: 160 }}>
                 <div className="t-name" style={{ overflowWrap: 'anywhere' }}>{u.display_name}</div>
                 <div className="t-small" style={{ marginTop: 3 }}>Recepción · {u.location_name ?? 'Sin sede'} · {u.username}</div>
+                <div className="t-small" style={{ marginTop: 3 }}>{salaryLabel(u)}</div>
               </div>
               {!u.active && <Badge>Inactivo</Badge>}
               <div className="hstack">
