@@ -28,8 +28,7 @@ jobs:
       APP_ENV: development
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10 }
+      - uses: pnpm/action-setup@v4   # versión desde packageManager en package.json
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
