@@ -1,8 +1,11 @@
 # Despliegue en Railway (opción recomendada para una sola clínica)
 
 Todo en un proyecto de Railway: la app, Postgres y un volumen (disco) para los estudios. Sin Vercel ni Supabase.
+Postgres de la plantilla de Railway es la versión 18 (las migraciones y pruebas pasan en 16, 17 y 18).
+El build usa pnpm 10 y Node 22, fijados en `package.json` (`packageManager` y `engines`).
 Costo esperado: el plan Hobby (5 USD al mes, que ya incluye 5 USD de consumo). Una clínica consume de 3 a 5 USD
-al mes. Pon un límite de gasto en **Workspace → Usage → Usage limits** (por ejemplo 8 USD).
+al mes. El límite de gasto (**Workspace → Usage → Usage limits**) es de toda la cuenta: si hay otros proyectos en la
+misma cuenta, fíjalo por encima de su consumo total, porque al alcanzarlo Railway detiene todos los servicios.
 
 ## Qué hace el repositorio por ti
 
@@ -42,8 +45,8 @@ al mes. Pon un límite de gasto en **Workspace → Usage → Usage limits** (por
 
 ## Respaldos
 
-- **Volúmenes** (estudios y la base, porque Postgres en Railway también vive en un volumen): en cada servicio
-  → **Backups** → programar diario. Se cobran por el espacio que ocupan.
+- **Volúmenes** (estudios y la base, porque Postgres en Railway también vive en un volumen): los Backups
+  programados de Railway **requieren el plan Pro**. En Hobby solo se pueden ver y restaurar respaldos existentes.
 - **Respaldo propio de la base** desde cualquier PC: `DIRECT_DATABASE_URL=<DATABASE_PUBLIC_URL del servicio
   Postgres> pnpm backup`. Los archivos del volumen se respaldan con los Backups de Railway.
 
